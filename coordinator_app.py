@@ -5,6 +5,7 @@ import numpy as np
 from sheets_manager import SheetsManager
 import config
 import time
+import random
 
 st.set_page_config(page_title="Pickleball Round Robin - Coordinator View", layout="wide")
 
@@ -16,46 +17,127 @@ def generate_next_matches(available_players_df, court_count):
     all_matches = sheets_mgr.read_sheet(config.SHEET_MATCHES)
     player_names = available_players_df[config.COL_NAME].tolist()
     
-    # Create a matrix of how many times players have played together
-    play_matrix = pd.DataFrame(0, index=player_names, columns=player_names)
+    # Create matrices to track playing with and against separately
+    partner_matrix = pd.DataFrame(0, index=player_names, columns=player_names)
+    opponent_matrix = pd.DataFrame(0, index=player_names, columns=player_names)
+    games_played = pd.Series(0, index=player_names)
     
-    for _, match in all_matches.iterrows():
+    # Weight recent matches more heavily using exponential decay
+    total_matches = len(all_matches)
+    for idx, match in all_matches.iterrows():
+        # More recent matches have higher weight (between 0.5 and 1.0)
+        recency_weight = 0.5 + 0.5 * (idx + 1) / total_matches
+        
         team1 = [match[config.COL_TEAM1_PLAYER1], match[config.COL_TEAM1_PLAYER2]]
         team2 = [match[config.COL_TEAM2_PLAYER1], match[config.COL_TEAM2_PLAYER2]]
-        for p1 in team1 + team2:
-            for p2 in team1 + team2:
+        
+        # Update games played count
+        for player in team1 + team2:
+            if player in player_names:
+                games_played[player] += 1
+        
+        # Update partner counts
+        for team in [team1, team2]:
+            if team[0] in player_names and team[1] in player_names:
+                partner_matrix.loc[team[0], team[1]] += recency_weight
+                partner_matrix.loc[team[1], team[0]] += recency_weight
+        
+        # Update opponent counts
+        for p1 in team1:
+            for p2 in team2:
                 if p1 in player_names and p2 in player_names:
-                    play_matrix.loc[p1, p2] += 1
+                    opponent_matrix.loc[p1, p2] += recency_weight
+                    opponent_matrix.loc[p2, p1] += recency_weight
     
     # Generate matches
     matches = []
     available_players = player_names.copy()
+    max_partner_count = 2  # Maximum times players can be paired together
+    min_games = games_played.min()
+    max_games = games_played.max()
+    
+    # Hard cap: no player should play more than min_games + 1 until everyone has played min_games
+    max_allowed_games = min_games + (1 if all(games_played >= min_games) else 0)
     
     while len(available_players) >= 4:
-        # Find the player who has played the least
-        player1 = min(available_players, key=lambda p: play_matrix.loc[p].sum())
+        # Filter out players who have reached the hard cap
+        eligible_players = [p for p in available_players if games_played[p] < max_allowed_games]
+        if not eligible_players:
+            # If no eligible players, reset max_allowed_games
+            max_allowed_games += 1
+            eligible_players = available_players
+        
+        # Among eligible players, find those who have played the least
+        min_eligible_games = min(games_played[p] for p in eligible_players)
+        least_played = [p for p in eligible_players if games_played[p] == min_eligible_games]
+        
+        # Randomly select from the least played players
+        player1 = random.choice(least_played)
         available_players.remove(player1)
         
-        # Find their partner (someone they've played with least)
-        potential_partners = available_players.copy()
-        partner = min(potential_partners, key=lambda p: play_matrix.loc[player1, p])
+        # Find potential partners (who haven't reached game limit)
+        potential_partners = [p for p in available_players 
+                            if partner_matrix.loc[player1, p] < max_partner_count
+                            and games_played[p] < max_allowed_games]
+        
+        if not potential_partners:  # If no partners under constraints, relax game count
+            potential_partners = [p for p in available_players 
+                               if partner_matrix.loc[player1, p] < max_partner_count]
+        
+        if not potential_partners:  # If still none, use all available
+            potential_partners = available_players.copy()
+        
+        # Get the minimum games played among potential partners
+        min_partner_games = min(games_played[p] for p in potential_partners)
+        best_partners = [p for p in potential_partners 
+                        if games_played[p] == min_partner_games
+                        and partner_matrix.loc[player1, p] == min(partner_matrix.loc[player1, potential_partners])]
+        
+        # Randomly select from best partners
+        partner = random.choice(best_partners)
         available_players.remove(partner)
         
-        # Find opponents (pair who has played least with team1)
-        potential_opponents = available_players.copy()
-        opponent_scores = {p: play_matrix.loc[player1, p] + play_matrix.loc[partner, p] 
-                         for p in potential_opponents}
-        opponent1 = min(opponent_scores.items(), key=lambda x: x[1])[0]
+        # Find opponents (who haven't reached game limit)
+        potential_opponents = [p for p in available_players 
+                             if games_played[p] < max_allowed_games]
+        if not potential_opponents:
+            potential_opponents = available_players.copy()
+        
+        # Get minimum games among potential opponents
+        min_opponent_games = min(games_played[p] for p in potential_opponents)
+        best_opponents = [p for p in potential_opponents 
+                         if games_played[p] == min_opponent_games]
+        
+        # Randomly select first opponent from best options
+        opponent1 = random.choice(best_opponents)
         available_players.remove(opponent1)
         
-        opponent_scores = {p: play_matrix.loc[player1, p] + play_matrix.loc[partner, p] +
-                         play_matrix.loc[opponent1, p] for p in available_players}
-        opponent2 = min(opponent_scores.items(), key=lambda x: x[1])[0]
+        # Repeat for second opponent
+        potential_opponents = [p for p in available_players 
+                             if games_played[p] < max_allowed_games]
+        if not potential_opponents:
+            potential_opponents = available_players.copy()
+        
+        min_opponent_games = min(games_played[p] for p in potential_opponents)
+        best_opponents = [p for p in potential_opponents 
+                         if games_played[p] == min_opponent_games]
+        
+        opponent2 = random.choice(best_opponents)
         available_players.remove(opponent2)
         
         matches.append([player1, partner, opponent1, opponent2])
+        
+        # Update games played for next iteration
+        for player in [player1, partner, opponent1, opponent2]:
+            games_played[player] += 1
+        
+        # Update minimum games and max allowed games
+        min_games = games_played[available_players].min() if available_players else 0
+        max_allowed_games = min_games + (1 if all(games_played >= min_games) else 0)
+        
+        if len(matches) >= court_count:
+            break
     
-    # If we have more matches than courts, we'll queue them up
     return matches
 
 def main():
