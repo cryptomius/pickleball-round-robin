@@ -4,7 +4,6 @@ __pycache__/
 *$py.class
 *.so
 .Python
-env/
 build/
 develop-eggs/
 dist/
@@ -21,22 +20,30 @@ wheels/
 .installed.cfg
 *.egg
 
-# Virtual Environment
+# Environments
+.env
+.venv
+env/
 venv/
 ENV/
+env.bak/
+venv.bak/
 
-# IDE
-.idea/
+# VS Code
 .vscode/
-*.swp
-*.swo
+*.code-workspace
+
+# Credentials
+credentials.json
+*.pem
+*.key
+*.p12
 
 # Streamlit
 .streamlit/
 
-# Credentials
-*.json
-credentials.py
-
-# Logs
-*.log
+# Local development
+.DS_Store
+.idea/
+*.swp
+*.swo

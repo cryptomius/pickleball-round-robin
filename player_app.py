@@ -1,10 +1,10 @@
 import streamlit as st
+from pickleball.sheets_manager import SheetsManager
+from pickleball import config
 import pandas as pd
 from datetime import datetime
 import numpy as np
 from PIL import Image
-from sheets_manager import SheetsManager
-import config
 import time
 import extra_streamlit_components as stx
 import traceback
@@ -123,61 +123,41 @@ def main():
                                 team1_score = your_score if player_team == 1 else opponent_score
                                 team2_score = opponent_score if player_team == 1 else your_score
                                 
-                                # Update match status to completed
-                                match_id = match[config.COL_MATCH_ID]
-                                status_result = sheets_mgr.update_match_status(match_id, config.STATUS_COMPLETED)
-                                if not status_result:
-                                    st.error("Failed to update match status")
-                                    return
-                                
-                                # Update scores and calculate points
-                                scores_data = sheets_mgr.update_match_score(match_id, team1_score, team2_score)
-                                if not scores_data:
-                                    st.error("Failed to update match scores")
-                                    return
-                                
-                                # Update scores sheet
-                                scores_df = sheets_mgr.read_sheet(config.SHEET_SCORES)
-                                scores_df = pd.concat([scores_df, pd.DataFrame(scores_data, columns=[config.COL_MATCH_ID, config.COL_NAME, config.COL_TOTAL_POINTS])], ignore_index=True)
-                                update_result = sheets_mgr.update_sheet(config.SHEET_SCORES, [scores_df.columns.tolist()] + scores_df.values.tolist())
-                                if update_result:
+                                # Update scores using the sheets manager
+                                if sheets_mgr.update_match_score(match[config.COL_MATCH_ID], team1_score, team2_score):
                                     st.success("Scores submitted successfully!")
                                     time.sleep(1)  # Give user time to see the success message
                                     st.rerun()
                                 else:
-                                    st.error("Failed to update scores sheet")
-                                    return
-                                
+                                    st.error("Failed to update match scores")
                         except Exception as e:
                             st.error(f"An error occurred: {str(e)}")
+                            traceback.print_exc()  # This will help debug by showing the full error
         
         # Display match history
-        st.header("Your Match History")
+        st.header("Your Matches")
         player_matches = matches_df[
-            ((matches_df[config.COL_TEAM1_PLAYER1] == selected_player) |
-             (matches_df[config.COL_TEAM1_PLAYER2] == selected_player) |
-             (matches_df[config.COL_TEAM2_PLAYER1] == selected_player) |
-             (matches_df[config.COL_TEAM2_PLAYER2] == selected_player)) &
-            (matches_df[config.COL_MATCH_STATUS] == config.STATUS_COMPLETED)
+            (matches_df[config.COL_TEAM1_PLAYER1] == selected_player) |
+            (matches_df[config.COL_TEAM1_PLAYER2] == selected_player) |
+            (matches_df[config.COL_TEAM2_PLAYER1] == selected_player) |
+            (matches_df[config.COL_TEAM2_PLAYER2] == selected_player)
         ]
         
         if not player_matches.empty:
+            st.write("### Completed Matches")
             for _, match in player_matches.iterrows():
-                st.write(f"\nMatch on {match[config.COL_COURT_NUMBER]}")
-                st.write(f"Team 1: {match[config.COL_TEAM1_PLAYER1]}, {match[config.COL_TEAM1_PLAYER2]}")
-                st.write(f"Team 2: {match[config.COL_TEAM2_PLAYER1]}, {match[config.COL_TEAM2_PLAYER2]}")
-                st.write(f"Score: {match[config.COL_TEAM1_SCORE]} - {match[config.COL_TEAM2_SCORE]}")
+                team1_score = match[config.COL_TEAM1_SCORE] if pd.notna(match[config.COL_TEAM1_SCORE]) else "-"
+                team2_score = match[config.COL_TEAM2_SCORE] if pd.notna(match[config.COL_TEAM2_SCORE]) else "-"
+                
+                # Format the match display
+                st.markdown(
+                    f"**{match[config.COL_MATCH_ID]}** ({match[config.COL_COURT_NUMBER]})  \n"
+                    f"{match[config.COL_TEAM1_PLAYER1]} & {match[config.COL_TEAM1_PLAYER2]} vs "
+                    f"{match[config.COL_TEAM2_PLAYER1]} & {match[config.COL_TEAM2_PLAYER2]}  \n"
+                    f"Score: {team1_score} - {team2_score}"
+                )
         else:
             st.write("No completed matches yet")
-    
-    # Tournament Leaderboard
-    #### disabled to avoid impact on player motivation
-    # st.header("Tournament Leaderboard")
-    # leaderboard = sheets_mgr.get_leaderboard()
-    # if not leaderboard.empty:
-    #     st.dataframe(leaderboard)
-    # else:
-    #     st.write("No scores recorded yet")
 
 if __name__ == "__main__":
     main()
