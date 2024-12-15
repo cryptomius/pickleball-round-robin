@@ -39,8 +39,9 @@ def initialize_sheets():
     
         # Initialize each sheet with headers
         players_headers = [
-            [config.COL_NAME, config.COL_STATUS, config.COL_TOTAL_POINTS,
-             config.COL_GAMES_PLAYED, config.COL_CHECK_IN_TIME, config.COL_LAST_MATCH_TIME]
+            [config.COL_NAME, config.COL_STATUS, config.COL_GENDER, config.COL_TOTAL_POINTS,
+             config.COL_GAMES_PLAYED, config.COL_CHECK_IN_TIME, config.COL_LAST_MATCH_TIME,
+             config.COL_AVG_POINTS]
         ]
 
         matches_headers = [

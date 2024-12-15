@@ -1,169 +1,126 @@
-# Pickleball Round Robin Tournament Manager
+# Pickleball Round Robin Tournament Coordinator
 
-A tournament management system for Lakes Entrance Pickleball Club's round-robin competition. The system ensures fair play through optimized match generation and balanced scoring.
+A Streamlit-based system for managing pickleball round robin tournaments, featuring fair play mechanics and real-time tournament tracking.
 
 ## Features
 
-### Player App
-- View your current and completed matches
-- Submit match scores for your games
-- Track your total points and games played
-- See your current match court assignment
-- View your team members and opponents
+### Player App (`player_app.py`)
+- View current and upcoming matches
+- Submit match scores
+- Track personal performance and standings
+- Simple interface for players to focus on the game
 
 ### Coordinator App
 1. **Player Management**
-   - Add/remove players
-   - Track player check-in/out status
-   - Monitor player participation
+   - Add and manage players with status tracking
+   - Mark players as women for separate standings
+   - Track check-in times and participation
+   - Toggle player active/inactive status
 
 2. **Match Management**
-   - Real-time court status overview
-   - Generate balanced matches automatically
-   - Submit and track match scores
-   - Cancel matches if needed
-   - View pending matches queue
+   - Automatic match generation with fair play balancing
+   - Court assignment and management
+   - Score submission and verification
+   - Match cancellation with automatic court reassignment
+   - Real-time match status tracking
 
 3. **Tournament Summary**
-   - Real-time leaderboard
-   - Sort by total points or average points per game
-   - Track total games completed
-   - Monitor player statistics
+   - Overall tournament statistics
+   - Sortable standings by total or average points
+   - Separate women's standings
+   - Real-time performance tracking
+   - Game participation metrics
 
 ## Fair Play Mechanisms
 
-### Match Generation
-The system ensures fair play through several mechanisms:
-
 1. **Equal Play Opportunity**
    - Tracks games played for each player
-   - Players with fewer games are prioritized in match generation
-   - Hard cap ensures no player plays more than one game ahead of others
+   - Prioritizes players with fewer games
+   - Ensures balanced participation across the tournament
 
 2. **Partner/Opponent Balancing**
-   - Maintains history of partnerships and opponents
-   - Uses weighted scoring to avoid repeated partnerships
-   - Considers recent matches more heavily than older ones
-   - Maximum partner count prevents playing with the same person too often
+   - Avoids repeated partnerships
+   - Distributes opponents fairly
+   - Weighted history to prevent immediate rematches
 
 3. **Court Assignment**
-   - Automatic court assignment for new matches
-   - When a match finishes or is cancelled, the next pending match is automatically assigned
-   - Ensures continuous play across all courts
+   - Automatic court rotation
+   - Efficient use of available courts
+   - Continuous play management
 
-### Scoring System
-1. **Base Points**
-   - Winning team: 2 points per player
-   - Losing team: 1 point per player
-
-2. **Bonus Points**
-   - 0.1 points per point difference
-   - Maximum bonus of 1.0 points
-   - Encourages competitive play while preventing excessive score differences
-
-3. **Statistics**
-   - Tracks total points and games played
-   - Calculates average points per game
-   - Allows sorting by either metric for different perspectives on performance
-
-## Deployment to Streamlit Cloud
-
-1. **Create a GitHub Repository**
-   - Create a new repository for the project
-   - Add `.gitignore` to exclude `credentials.json`
-   - Push code to repository
-
-2. **Prepare Credentials**
-   - Open your `credentials.json` file
-   - Copy the entire contents
-   - Convert to a single line (remove newlines)
-
-3. **Set Up Streamlit Cloud**
-   - Connect your GitHub repository to Streamlit Cloud
-   - In app settings, add the following secret:
-     - Key: `GOOGLE_CREDENTIALS_JSON`
-     - Value: [Your credentials.json contents as a single line]
-
-4. **Deploy Apps**
-   - Deploy both coordinator and player apps
-   - Each will use the same credentials from environment variables
-   - Local development will still use `credentials.json` file
+4. **Scoring System**
+   - Base points for participation
+   - Win/loss points
+   - Bonus points for point differential
+   - Average points per game tracking
 
 ## Setup Instructions
 
-1. Create a Google Cloud Project and enable Google Sheets API
-2. Create service account credentials and download JSON key
-3. Create a Google Sheet with the following structure:
-   - Players
-   - Matches
-   - Courts
-   - Scores
+1. Create a Google Cloud Project:
+   - Enable Google Sheets API
+   - Create service account credentials
+   - Share your tournament spreadsheet with the service account email
 
-4. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
+2. Local Development:
+   - Create `.streamlit/secrets.toml` with your Google credentials
+   - Install requirements: `pip install -r requirements.txt`
+   - Run coordinator: `streamlit run coordinator/Home.py`
+   - Run player app: `streamlit run player_app.py`
 
-5. Run the apps:
-```bash
-# For Players
-streamlit run player_app.py
-
-# For Coordinators
-streamlit run coordinator_app.py
-```
-
-## Sheet Structure
-
-### Players Sheet
-- Player Name
-- Status (Active/Inactive)
-- Total Points
-- Games Played
-- Average Points per Game
-- Check-in Time
-- Last Match Time
-
-### Matches Sheet
-- Match ID
-- Court Number
-- Team 1 - Player 1
-- Team 1 - Player 2
-- Team 2 - Player 1
-- Team 2 - Player 2
-- Start Time
-- End Time
-- Team 1 Score
-- Team 2 Score
-- Match Status (Pending/Scheduled/In Progress/Completed)
-
-### Courts Sheet
-- Court Number
-- Status
-- Current Match ID
-
-### Scores Sheet
-- Match ID
-- Player Name
-- Points Earned
+3. Deployment (Streamlit Cloud):
+   - Push code to GitHub (credentials.json excluded)
+   - Connect repository to Streamlit Cloud
+   - Add Google credentials to Streamlit Cloud secrets
+   - Deploy both coordinator and player apps
 
 ## Recent Updates
-1. **Match Management**
-   - Added match cancellation feature
-   - Improved court reassignment logic
-   - Fixed duplicate match ID issues
 
-2. **Player Management**
-   - Enhanced player addition with error handling
-   - Added check-in time tracking
-   - Improved status management
+1. **Player Management**
+   - Added gender tracking for women players
+   - Enhanced player status management
+   - Improved check-in time tracking
+
+2. **Match Management**
+   - Added match cancellation feature
+   - Improved score submission validation
+   - Automatic court reassignment after matches
 
 3. **Tournament Summary**
-   - Added sorting options (total/average points)
+   - Added separate women's standings
+   - Enhanced sorting options
    - Improved points display formatting
-   - Added games completed counter
+   - Added real-time tournament metrics
 
-4. **Score Submission**
-   - Unified scoring logic between coordinator and player apps
-   - Enhanced error handling and validation
-   - Added automatic court reassignment after match completion
+## Dependencies
+- streamlit
+- pandas
+- google-auth
+- google-auth-oauthlib
+- google-auth-httplib2
+- google-api-python-client
+- extra-streamlit-components
+
+## Sheet Structure
+1. **Players**
+   - Player Name
+   - Status (Active/Inactive)
+   - Gender (W for women)
+   - Total Points
+   - Games Played
+   - Check-in Time
+   - Last Match Time
+   - Average Points Per Game
+
+2. **Matches**
+   - Match ID
+   - Court Number
+   - Team 1 & 2 Players
+   - Start/End Times
+   - Scores
+   - Match Status
+
+3. **Courts**
+   - Court assignments and availability
+
+## Contributing
+Feel free to submit issues and enhancement requests!
