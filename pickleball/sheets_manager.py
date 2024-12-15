@@ -83,6 +83,7 @@ class SheetsManager:
                 return pd.DataFrame(columns=[
                     config.COL_NAME,
                     config.COL_STATUS,
+                    config.COL_GENDER,
                     config.COL_TOTAL_POINTS,
                     config.COL_GAMES_PLAYED,
                     config.COL_CHECK_IN_TIME,
@@ -116,6 +117,7 @@ class SheetsManager:
             expected_header = [
                 config.COL_NAME,
                 config.COL_STATUS,
+                config.COL_GENDER,
                 config.COL_TOTAL_POINTS,
                 config.COL_GAMES_PLAYED,
                 config.COL_CHECK_IN_TIME,
@@ -368,44 +370,36 @@ class SheetsManager:
         # Update the sheet
         self.update_sheet(config.SHEET_PLAYERS, [players_df.columns.tolist()] + players_df.values.tolist())
 
-    def add_player(self, player_name):
+    def add_player(self, player_name, is_woman=False):
         """Add a new player to the Players sheet."""
         try:
-            # Get current players
+            # Read existing players
             players_df = self.read_sheet(config.SHEET_PLAYERS)
             
             # Check if player already exists
-            if player_name in players_df[config.COL_NAME].values:
-                return False, "Player already exists"
+            if not players_df.empty and player_name in players_df[config.COL_NAME].values:
+                return False, f"Player '{player_name}' already exists"
             
-            # Create new player row with explicit types
-            current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            new_player = pd.DataFrame([{
-                config.COL_NAME: str(player_name),
-                config.COL_STATUS: str(config.STATUS_PLAYER_ACTIVE),
+            # Create new player row
+            new_player = {
+                config.COL_NAME: player_name,
+                config.COL_STATUS: config.STATUS_ACTIVE,
+                config.COL_GENDER: "W" if is_woman else "",
                 config.COL_TOTAL_POINTS: 0,
                 config.COL_GAMES_PLAYED: 0,
-                config.COL_AVG_POINTS: 0.0,
-                config.COL_CHECK_IN_TIME: current_time,
-                config.COL_LAST_MATCH_TIME: ""
-            }])
+                config.COL_CHECK_IN_TIME: "",
+                config.COL_LAST_MATCH_TIME: "",
+                config.COL_AVG_POINTS: 0
+            }
             
-            # Add to DataFrame
-            players_df = pd.concat([players_df, new_player], ignore_index=True)
-            
-            # Convert any remaining NaN or empty strings to appropriate defaults and fix types
-            players_df[config.COL_TOTAL_POINTS] = pd.to_numeric(players_df[config.COL_TOTAL_POINTS].replace('', '0'), errors='coerce').fillna(0).astype(int)
-            players_df[config.COL_GAMES_PLAYED] = pd.to_numeric(players_df[config.COL_GAMES_PLAYED].replace('', '0'), errors='coerce').fillna(0).astype(int)
-            players_df[config.COL_AVG_POINTS] = pd.to_numeric(players_df[config.COL_AVG_POINTS].replace('', '0'), errors='coerce').fillna(0.0).astype(float)
-            players_df[config.COL_LAST_MATCH_TIME] = players_df[config.COL_LAST_MATCH_TIME].fillna("")
-            players_df[config.COL_CHECK_IN_TIME] = players_df[config.COL_CHECK_IN_TIME].fillna("")
+            # Append new player
+            players_df = pd.concat([players_df, pd.DataFrame([new_player])], ignore_index=True)
             
             # Update sheet
             self.update_sheet(config.SHEET_PLAYERS, [players_df.columns.tolist()] + players_df.values.tolist())
-            return True, "Player added successfully"
             
+            return True, f"Successfully added player '{player_name}'"
         except Exception as e:
-            print(f"Error adding player: {str(e)}")
             return False, f"Error adding player: {str(e)}"
 
     def generate_next_matches(self, active_players, court_count):

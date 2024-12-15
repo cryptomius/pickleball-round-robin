@@ -30,6 +30,7 @@ SHEET_SETTINGS = "Settings"
 # Players Sheet
 COL_NAME = "Player Name"
 COL_STATUS = "Status"
+COL_GENDER = "Gender"  # New column for gender
 COL_TOTAL_POINTS = "Total Points"
 COL_GAMES_PLAYED = "Games Played"
 COL_CHECK_IN_TIME = "Check-in Time"
