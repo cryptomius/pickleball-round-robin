@@ -18,7 +18,7 @@ def display_qr_code():
     
     # Generate QR code for the current page URL
     qr = qrcode.QRCode(version=1, box_size=10, border=5)
-    qr.add_data(st.experimental_get_query_params().get('', [''])[0])  # Get the current URL
+    qr.add_data("https://pickleball-tournament.streamlit.app/")  # Get the current URL
     qr.make(fit=True)
     
     # Create the QR code image

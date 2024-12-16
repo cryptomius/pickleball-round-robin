@@ -24,7 +24,7 @@ st.write("Scan this code to open the coordinator app on another device:")
 
 # Generate QR code for the current page URL
 qr = qrcode.QRCode(version=1, box_size=10, border=5)
-current_url = st.experimental_get_query_params().get('', [''])[0]
+current_url = "https://pickleball-coordinator.streamlit.app/"
 qr.add_data(current_url)
 qr.make(fit=True)
 
