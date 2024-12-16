@@ -423,29 +423,34 @@ class SheetsManager:
         # Weight recent matches more heavily using exponential decay
         total_matches = len(matches_df)
         for idx, match in matches_df.iterrows():
-            # More recent matches have higher weight (between 0.5 and 1.0)
-            recency_weight = 0.5 + 0.5 * (idx + 1) / total_matches
+            # More recent matches have higher weight (0.25 to 1.0)
+            recency_weight = 0.25 + 0.75 * (idx + 1) / total_matches
             
-            team1 = [match[config.COL_TEAM1_PLAYER1], match[config.COL_TEAM1_PLAYER2]]
-            team2 = [match[config.COL_TEAM2_PLAYER1], match[config.COL_TEAM2_PLAYER2]]
-            
-            # Update games played count
-            for player in team1 + team2:
-                if player in active_players:
-                    games_played[player] += 1
-            
-            # Update partner counts
-            for team in [team1, team2]:
-                if team[0] in active_players and team[1] in active_players:
-                    partner_matrix.loc[team[0], team[1]] += recency_weight
-                    partner_matrix.loc[team[1], team[0]] += recency_weight
-            
-            # Update opponent counts
-            for p1 in team1:
-                for p2 in team2:
-                    if p1 in active_players and p2 in active_players:
-                        opponent_matrix.loc[p1, p2] += recency_weight
-                        opponent_matrix.loc[p2, p1] += recency_weight
+            # Only consider matches that are completed, scheduled, or in progress
+            if match[config.COL_MATCH_STATUS] in [config.STATUS_COMPLETED, config.STATUS_SCHEDULED, config.STATUS_IN_PROGRESS]:
+                team1 = [match[config.COL_TEAM1_PLAYER1], match[config.COL_TEAM1_PLAYER2]]
+                team2 = [match[config.COL_TEAM2_PLAYER1], match[config.COL_TEAM2_PLAYER2]]
+                
+                # Update games played count
+                for player in team1 + team2:
+                    if player in active_players:
+                        games_played[player] += 1
+                
+                # Update partner counts with higher weight for non-completed matches
+                status_weight = 2.0 if match[config.COL_MATCH_STATUS] != config.STATUS_COMPLETED else 1.0
+                for team in [team1, team2]:
+                    if team[0] in active_players and team[1] in active_players:
+                        weight = recency_weight * status_weight
+                        partner_matrix.loc[team[0], team[1]] += weight
+                        partner_matrix.loc[team[1], team[0]] += weight
+                
+                # Update opponent counts
+                for p1 in team1:
+                    for p2 in team2:
+                        if p1 in active_players and p2 in active_players:
+                            weight = recency_weight * status_weight
+                            opponent_matrix.loc[p1, p2] += weight
+                            opponent_matrix.loc[p2, p1] += weight
         
         # Get players who are currently in active or scheduled matches
         busy_players = set()
@@ -464,7 +469,7 @@ class SheetsManager:
         
         # Generate matches
         matches = []
-        max_partner_count = 2  # Maximum times players can be paired together
+        max_partner_count = 1  # Lower max partner count to 1 to prevent repeat partnerships
         min_games = games_played.min()
         max_games = games_played.max()
         
@@ -492,12 +497,16 @@ class SheetsManager:
                                 if partner_matrix.loc[player1, p] < max_partner_count
                                 and games_played[p] < max_allowed_games]
             
-            if not potential_partners:  # If no partners under constraints, relax game count
+            if not potential_partners:  # If no partners under constraints, relax game count but keep partner constraint
                 potential_partners = [p for p in available_players 
                                    if partner_matrix.loc[player1, p] < max_partner_count]
             
-            if not potential_partners:  # If still none, use all available
+            if not potential_partners:  # If still none, use all available but prioritize least partnered
                 potential_partners = available_players.copy()
+                # Sort by partnership count to minimize repeat partnerships
+                potential_partners.sort(key=lambda p: partner_matrix.loc[player1, p])
+                # Take only the first half of sorted partners to avoid worst pairings
+                potential_partners = potential_partners[:len(potential_partners)//2]
             
             # Get the minimum games played among potential partners
             min_partner_games = min(games_played[p] for p in potential_partners)
