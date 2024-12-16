@@ -446,7 +446,8 @@ class SheetsManager:
                 match[config.COL_TEAM2_PLAYER1], 
                 match[config.COL_TEAM2_PLAYER2]
             ]
-            if not all(p in team1_players + team2_players or self.is_player_active(p) for p in all_players):
+            # Skip if any players in the match are not in current teams and not active
+            if not all(p in team1_players + team2_players or self.is_player_active(p) for p in all_players if pd.notna(p)):
                 continue
                 
             existing_key = self.get_match_key(
@@ -467,6 +468,14 @@ class SheetsManager:
                     return True
         
         return False
+
+    def is_player_active(self, player_name):
+        """Check if a player is currently active"""
+        players_df = self.read_sheet(config.SHEET_PLAYERS)
+        player_data = players_df[players_df[config.COL_NAME] == player_name]
+        if player_data.empty:
+            return False
+        return player_data[config.COL_STATUS].iloc[0] == config.STATUS_PLAYER_ACTIVE
 
     def generate_next_matches(self, active_players, court_count):
         """Generate optimal matches based on player history"""
