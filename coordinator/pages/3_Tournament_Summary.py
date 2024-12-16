@@ -8,6 +8,18 @@ sheets_mgr = SheetsManager()
 
 st.title("Tournament Summary")
 
+# Add custom CSS
+st.markdown("""
+    <style>
+    .block-container {
+        padding: 1.5rem 1.4rem !important;
+    }
+    .appview-container section:first-child {
+        width: 250px !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
 # Get tournament data
 players_df = sheets_mgr.read_sheet(config.SHEET_PLAYERS)
 matches_df = sheets_mgr.read_sheet(config.SHEET_MATCHES)

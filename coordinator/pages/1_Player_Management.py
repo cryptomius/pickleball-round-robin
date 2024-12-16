@@ -28,6 +28,18 @@ if 'form_submitted' not in st.session_state:
 
 st.title("Player Management")
 
+# Add custom CSS
+st.markdown("""
+    <style>
+    .block-container {
+        padding: 1.5rem 1.4rem !important;
+    }
+    .appview-container section:first-child {
+        width: 250px !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
 # Create a container for the match removal confirmation
 match_removal_container = st.empty()
 

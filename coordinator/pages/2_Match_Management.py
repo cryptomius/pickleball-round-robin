@@ -9,6 +9,20 @@ sheets_mgr = SheetsManager()
 
 st.title("Match Management")
 
+# Add custom CSS and hide sidebar
+st.markdown("""
+    <style>
+    .block-container {
+        padding: 1.5rem 1.4rem !important;
+    }
+    .appview-container section:first-child {
+        width: 250px !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+
+
 # Get active players for match generation
 players_df = sheets_mgr.read_sheet(config.SHEET_PLAYERS)
 active_players = players_df[players_df[config.COL_STATUS] == config.STATUS_PLAYER_ACTIVE]
