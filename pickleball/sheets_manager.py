@@ -435,6 +435,9 @@ class SheetsManager:
         match_key = self.get_match_key(team1_players, team2_players)
         current_date = pd.Timestamp.now()
         
+        # Get players DataFrame once for all active checks
+        players_df = self.read_sheet(config.SHEET_PLAYERS)
+        
         # Sort matches by date to count matches since a particular match
         matches_df = matches_df.sort_values(config.COL_START_TIME)
         
@@ -447,7 +450,7 @@ class SheetsManager:
                 match[config.COL_TEAM2_PLAYER2]
             ]
             # Skip if any players in the match are not in current teams and not active
-            if not all(p in team1_players + team2_players or self.is_player_active(p) for p in all_players if pd.notna(p)):
+            if not all(p in team1_players + team2_players or self.is_player_active(p, players_df) for p in all_players if pd.notna(p)):
                 continue
                 
             existing_key = self.get_match_key(
@@ -469,9 +472,10 @@ class SheetsManager:
         
         return False
 
-    def is_player_active(self, player_name):
+    def is_player_active(self, player_name, players_df=None):
         """Check if a player is currently active"""
-        players_df = self.read_sheet(config.SHEET_PLAYERS)
+        if players_df is None:
+            players_df = self.read_sheet(config.SHEET_PLAYERS)
         player_data = players_df[players_df[config.COL_NAME] == player_name]
         if player_data.empty:
             return False
