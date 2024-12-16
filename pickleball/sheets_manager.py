@@ -156,7 +156,15 @@ class SheetsManager:
         return pd.DataFrame(data, columns=header)
 
     def update_sheet(self, range_name, values):
+        """Update a sheet with new values, clearing any existing data first."""
         try:
+            # Clear the entire range first
+            clear_result = self.sheet.values().clear(
+                spreadsheetId=config.SPREADSHEET_ID,
+                range=range_name
+            ).execute()
+
+            # Then update with new values
             body = {
                 'values': values
             }
@@ -407,11 +415,6 @@ class SheetsManager:
         # Get existing matches to check who has played together
         matches_df = self.read_sheet(config.SHEET_MATCHES)
         
-        # Get available courts
-        available_courts = self.get_available_courts()
-        if len(available_courts) == 0:
-            return None
-
         # Create matrices to track playing with and against separately
         partner_matrix = pd.DataFrame(0.0, index=active_players, columns=active_players, dtype=float)
         opponent_matrix = pd.DataFrame(0.0, index=active_players, columns=active_players, dtype=float)
@@ -444,9 +447,23 @@ class SheetsManager:
                         opponent_matrix.loc[p1, p2] += recency_weight
                         opponent_matrix.loc[p2, p1] += recency_weight
         
+        # Get players who are currently in active or scheduled matches
+        busy_players = set()
+        for _, match in matches_df[
+            matches_df[config.COL_MATCH_STATUS].isin([config.STATUS_SCHEDULED, config.STATUS_IN_PROGRESS])
+        ].iterrows():
+            busy_players.update([
+                match[config.COL_TEAM1_PLAYER1],
+                match[config.COL_TEAM1_PLAYER2],
+                match[config.COL_TEAM2_PLAYER1],
+                match[config.COL_TEAM2_PLAYER2]
+            ])
+        
+        # Remove busy players from available players
+        available_players = [p for p in active_players if p not in busy_players]
+        
         # Generate matches
         matches = []
-        available_players = active_players.copy()
         max_partner_count = 2  # Maximum times players can be paired together
         min_games = games_played.min()
         max_games = games_played.max()
@@ -559,7 +576,7 @@ class SheetsManager:
             min_games = games_played[available_players].min() if available_players else 0
             max_allowed_games = min_games + (1 if all(games_played >= min_games) else 0)
             
-            if len(matches) >= court_count:
+            if len(matches) >= court_count * 3:  # Generate up to 3x the number of courts
                 break
 
         if matches:
@@ -567,23 +584,36 @@ class SheetsManager:
             matches_df = self.read_sheet(config.SHEET_MATCHES)
             courts_df = self.read_sheet(config.SHEET_COURTS)
             
-            # Get courts that don't have active or scheduled matches
-            active_courts = matches_df[
+            # Get courts that have active or scheduled matches
+            busy_courts = matches_df[
                 matches_df[config.COL_MATCH_STATUS].isin([config.STATUS_SCHEDULED, config.STATUS_IN_PROGRESS])
             ][config.COL_COURT_NUMBER].unique()
             
+            # Get available courts (including empty strings and NaN)
             available_courts = courts_df[
-                ~courts_df[config.COL_COURT_NUMBER].isin(active_courts)
+                ~courts_df[config.COL_COURT_NUMBER].isin(busy_courts)
             ][config.COL_COURT_NUMBER].tolist()
             
-            # Assign available courts to matches
-            for i, match in enumerate(matches):
+            # Get pending matches in order
+            pending_matches = matches_df[
+                matches_df[config.COL_MATCH_STATUS] == config.STATUS_PENDING
+            ].sort_values(by=config.COL_MATCH_ID)
+            
+            # Combine pending matches with new matches
+            all_matches = list(pending_matches.to_dict('records')) + matches
+            
+            # Assign available courts to matches in order
+            for i, match in enumerate(all_matches):
                 if i < len(available_courts):
                     match[config.COL_COURT_NUMBER] = available_courts[i]
                     match[config.COL_MATCH_STATUS] = config.STATUS_SCHEDULED
             
             # Add matches to sheet
-            matches_df = pd.concat([matches_df, pd.DataFrame(matches)], ignore_index=True)
+            matches_df = pd.concat([
+                matches_df[~matches_df[config.COL_MATCH_ID].isin([m[config.COL_MATCH_ID] for m in all_matches])],
+                pd.DataFrame(all_matches)
+            ], ignore_index=True)
+            
             self.update_sheet(config.SHEET_MATCHES, [matches_df.columns.tolist()] + matches_df.values.tolist())
             return matches
         
@@ -625,3 +655,168 @@ class SheetsManager:
         except Exception as e:
             print(f"Error cancelling match: {str(e)}")
             return False, f"Error cancelling match: {str(e)}"
+
+    def handle_player_inactivation(self, player_name):
+        """Handle matches when a player is marked as inactive."""
+        matches_df = self.read_sheet(config.SHEET_MATCHES)
+        
+        # Find matches involving the player
+        player_matches = matches_df[
+            ((matches_df[config.COL_TEAM1_PLAYER1] == player_name) |
+             (matches_df[config.COL_TEAM1_PLAYER2] == player_name) |
+             (matches_df[config.COL_TEAM2_PLAYER1] == player_name) |
+             (matches_df[config.COL_TEAM2_PLAYER2] == player_name)) &
+            (matches_df[config.COL_MATCH_STATUS].isin([config.STATUS_SCHEDULED, config.STATUS_PENDING]))
+        ]
+        
+        if player_matches.empty:
+            return None, None
+        
+        # Separate current (on court) and scheduled (pending) matches
+        current_matches = player_matches[
+            (player_matches[config.COL_MATCH_STATUS] == config.STATUS_SCHEDULED) &
+            (player_matches[config.COL_COURT_NUMBER] != "")
+        ]
+        scheduled_matches = player_matches[
+            (player_matches[config.COL_MATCH_STATUS] == config.STATUS_PENDING) |
+            ((player_matches[config.COL_MATCH_STATUS] == config.STATUS_SCHEDULED) &
+             (player_matches[config.COL_COURT_NUMBER] == ""))
+        ]
+        
+        return current_matches, scheduled_matches
+
+    def assign_pending_matches_to_courts(self, freed_courts):
+        """Assign pending matches to freed up courts."""
+        if not freed_courts:
+            return
+            
+        matches_df = self.read_sheet(config.SHEET_MATCHES)
+        
+        # Get players who are currently in active or scheduled matches
+        busy_players = set()
+        for _, match in matches_df[
+            matches_df[config.COL_MATCH_STATUS].isin([config.STATUS_SCHEDULED, config.STATUS_IN_PROGRESS])
+        ].iterrows():
+            busy_players.update([
+                match[config.COL_TEAM1_PLAYER1],
+                match[config.COL_TEAM1_PLAYER2],
+                match[config.COL_TEAM2_PLAYER1],
+                match[config.COL_TEAM2_PLAYER2]
+            ])
+        
+        # Get pending matches (no court assigned and status is pending)
+        pending_matches = matches_df[
+            (matches_df[config.COL_MATCH_STATUS] == config.STATUS_PENDING)
+        ].copy()
+        
+        if pending_matches.empty:
+            return
+        
+        # Filter out pending matches where any player is already in a match
+        valid_pending_matches = []
+        for _, match in pending_matches.iterrows():
+            match_players = {
+                match[config.COL_TEAM1_PLAYER1],
+                match[config.COL_TEAM1_PLAYER2],
+                match[config.COL_TEAM2_PLAYER1],
+                match[config.COL_TEAM2_PLAYER2]
+            }
+            if not match_players & busy_players:  # No intersection with busy players
+                valid_pending_matches.append(match)
+        
+        pending_matches = pd.DataFrame(valid_pending_matches)
+        
+        if pending_matches.empty:
+            return
+        
+        # Sort pending matches by match ID to maintain order
+        pending_matches = pending_matches.sort_values(by=config.COL_MATCH_ID)
+        
+        # Track which matches were updated
+        updated_matches = []
+        
+        # Assign courts to pending matches
+        for court in freed_courts:
+            if pending_matches.empty:
+                break
+                
+            # Get the first pending match
+            match_idx = pending_matches.index[0]
+            match_id = pending_matches.at[match_idx, config.COL_MATCH_ID]
+            
+            # Get players in this match
+            match = pending_matches.loc[match_idx]
+            match_players = {
+                match[config.COL_TEAM1_PLAYER1],
+                match[config.COL_TEAM1_PLAYER2],
+                match[config.COL_TEAM2_PLAYER1],
+                match[config.COL_TEAM2_PLAYER2]
+            }
+            
+            # Update busy players set
+            busy_players.update(match_players)
+            
+            # Update the match in the main dataframe
+            match_mask = matches_df[config.COL_MATCH_ID] == match_id
+            matches_df.loc[match_mask, config.COL_COURT_NUMBER] = court
+            matches_df.loc[match_mask, config.COL_MATCH_STATUS] = config.STATUS_SCHEDULED
+            
+            # Track this match
+            updated_matches.append(match_id)
+            
+            # Remove the match from pending matches
+            pending_matches = pending_matches.drop(match_idx)
+            
+            # Filter remaining pending matches to remove any with now-busy players
+            valid_pending_matches = []
+            for _, m in pending_matches.iterrows():
+                m_players = {
+                    m[config.COL_TEAM1_PLAYER1],
+                    m[config.COL_TEAM1_PLAYER2],
+                    m[config.COL_TEAM2_PLAYER1],
+                    m[config.COL_TEAM2_PLAYER2]
+                }
+                if not m_players & busy_players:  # No intersection with busy players
+                    valid_pending_matches.append(m)
+            pending_matches = pd.DataFrame(valid_pending_matches)
+            
+            if pending_matches.empty:
+                break
+        
+        # Only update if we made changes
+        if updated_matches:
+            # Update the matches sheet
+            self.update_sheet(config.SHEET_MATCHES, [matches_df.columns.tolist()] + matches_df.values.tolist())
+
+    def remove_matches(self, match_ids, assign_pending=True, return_freed_courts=False):
+        """Remove specified matches from the Matches sheet and optionally assign pending matches to freed courts."""
+        matches_df = self.read_sheet(config.SHEET_MATCHES)
+        
+        # Get courts that will be freed up
+        freed_courts = matches_df[
+            (matches_df[config.COL_MATCH_ID].isin(match_ids)) &
+            (matches_df[config.COL_COURT_NUMBER].notna()) &  # Check for non-empty and non-null
+            (matches_df[config.COL_COURT_NUMBER] != "") &
+            (matches_df[config.COL_MATCH_STATUS].isin([config.STATUS_SCHEDULED, config.STATUS_IN_PROGRESS]))
+        ][config.COL_COURT_NUMBER].unique().tolist()  # Use unique to prevent duplicates
+        
+        # Remove the matches
+        matches_df = matches_df[~matches_df[config.COL_MATCH_ID].isin(match_ids)]
+        
+        # Update the matches sheet
+        self.update_sheet(config.SHEET_MATCHES, [matches_df.columns.tolist()] + matches_df.values.tolist())
+        
+        # Either assign pending matches or return the freed courts
+        if assign_pending and freed_courts:
+            self.assign_pending_matches_to_courts(freed_courts)
+            return None
+        elif return_freed_courts:
+            return freed_courts
+        return None
+
+    def generate_replacement_matches(self, num_matches):
+        """Generate new matches to replace removed ones."""
+        players_df = self.read_sheet(config.SHEET_PLAYERS)
+        active_players = players_df[players_df[config.COL_STATUS] == config.STATUS_ACTIVE]
+        if len(active_players) >= 4:  # Need at least 4 players for a match
+            self.generate_next_matches(active_players[config.COL_NAME].tolist(), num_matches)
