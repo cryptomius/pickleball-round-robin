@@ -8,6 +8,8 @@ from PIL import Image
 import time
 import extra_streamlit_components as stx
 import traceback
+import qrcode
+import io
 
 def main():
     # Set page auto refresh interval (milliseconds)
@@ -158,6 +160,26 @@ def main():
                 )
         else:
             st.write("No completed matches yet")
+
+    # Add QR code at the bottom of the page
+    st.markdown("---")  # Add a separator
+    st.subheader("Let someone scan this code to view the player app")
+    
+    # Generate QR code for the current page URL
+    qr = qrcode.QRCode(version=1, box_size=10, border=5)
+    qr.add_data(st.experimental_get_query_params().get('', [''])[0])  # Get the current URL
+    qr.make(fit=True)
+    
+    # Create the QR code image
+    img = qr.make_image(fill_color="black", back_color="white")
+    
+    # Convert PIL image to bytes
+    img_byte_arr = io.BytesIO()
+    img.save(img_byte_arr, format='PNG')
+    img_byte_arr = img_byte_arr.getvalue()
+    
+    # Display the QR code
+    st.image(img_byte_arr)
 
 if __name__ == "__main__":
     main()
