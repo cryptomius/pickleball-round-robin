@@ -576,7 +576,7 @@ class SheetsManager:
             min_games = games_played[available_players].min() if available_players else 0
             max_allowed_games = min_games + (1 if all(games_played >= min_games) else 0)
             
-            if len(matches) >= court_count * 3:  # Generate up to 3x the number of courts
+            if len(matches) >= court_count * 2:  # Generate up to 2x the number of courts
                 break
 
         if matches:
