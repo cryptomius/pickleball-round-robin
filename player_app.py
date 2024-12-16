@@ -43,9 +43,10 @@ def display_qr_code():
     
     #### 🤝 Player Matching
     Our smart matching system ensures:
-    - You play with different partners and opponents each round
-    - Matches are balanced based on previous performance
-    - Everyone gets equal playing time
+    - Equal play time: Players with fewer games get priority
+    - New partnerships: You'll play with different partners each round
+    - Fresh competition: You'll face different opponents each time
+    - No one sits out too long: Everyone plays a similar number of games
     
     #### 💫 Why This System?
     - Everyone earns points in every game - keeping it fun and engaging!
