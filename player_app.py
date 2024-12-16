@@ -83,19 +83,34 @@ def main():
     players_df = sheets_mgr.read_sheet(config.SHEET_PLAYERS)
     player_names = players_df[config.COL_NAME].sort_values().tolist()
 
-    # Get current selection from cookie
+    # Get current selection from cookie and initialize session state
     cookie_manager = stx.CookieManager()
-    current_selection = cookie_manager.get(cookie="selected_player")
+    current_cookie = cookie_manager.get(cookie="selected_player")
+    
+    # Initialize session state for player name if it doesn't exist or is empty
+    if "player_name" not in st.session_state or not st.session_state.get("player_name"):
+        if current_cookie and current_cookie in player_names:
+            st.session_state.player_name = current_cookie
+        else:
+            st.session_state.player_name = ""
+    
+    # Calculate the index for the selectbox
+    default_index = 0
+    if st.session_state.get("player_name") and st.session_state.player_name in player_names:
+        default_index = player_names.index(st.session_state.player_name) + 1
     
     # Player selection
-    index = (player_names.index(current_selection) + 1) if current_selection in player_names else 0
-    
     selected_player = st.selectbox(
         "Select Your Name",
         [""] + player_names,
-        index=index,
-        key="player_select"
+        index=default_index
     )
+
+    # Update session state and cookie when player changes
+    if selected_player != st.session_state.get("player_name"):
+        st.session_state.player_name = selected_player
+        if selected_player:  # Only set cookie if a player is selected
+            cookie_manager.set("selected_player", selected_player)
 
     if not selected_player:
         st.info("Please select your name to view your matches and status")
