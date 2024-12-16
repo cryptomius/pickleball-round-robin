@@ -32,6 +32,28 @@ def display_qr_code():
     # Display the QR code
     st.image(img_byte_arr)
 
+    # Add explanation of scoring and matching system
+    st.markdown("""
+    ### How the Tournament Works
+    
+    #### 🎯 Scoring System
+    - Win a match: 2 points
+    - Lose a match: 1 point
+    - Bonus points: Up to 1 extra point based on score difference (0.1 points per point difference)
+    
+    #### 🤝 Player Matching
+    Our smart matching system ensures:
+    - You play with different partners and opponents each round
+    - Matches are balanced based on previous performance
+    - Everyone gets equal playing time
+    
+    #### 💫 Why This System?
+    - Everyone earns points in every game - keeping it fun and engaging!
+    - Bonus points reward great play while keeping matches competitive
+    - Mixed partnerships help you meet and play with everyone
+    - Perfect for a social tournament where fun and fairness come first!
+    """)
+
 def main():
     # Set page auto refresh interval (milliseconds)
     st.set_page_config(
@@ -167,8 +189,8 @@ def main():
                 (matches_df[config.COL_MATCH_STATUS] == config.STATUS_PENDING)
             ]
             
+            st.write("### Up-coming Matches")
             if not upcoming_matches.empty:
-                st.write("### Up-coming Matches")
                 for _, match in upcoming_matches.iterrows():
                     court_number = match[config.COL_COURT_NUMBER]
                     if pd.isna(court_number) or court_number == "":
@@ -181,6 +203,8 @@ def main():
                         f"{match[config.COL_TEAM1_PLAYER1]} & {match[config.COL_TEAM1_PLAYER2]} vs "
                         f"{match[config.COL_TEAM2_PLAYER1]} & {match[config.COL_TEAM2_PLAYER2]}"
                     )
+            else:
+                st.info("Check back in 10 minutes or when a court is free for your next scheduled match")
 
             # Display completed matches
             completed_matches = matches_df[
