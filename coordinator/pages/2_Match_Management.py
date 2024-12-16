@@ -87,14 +87,24 @@ else:
     if court_count == 0:
         st.error("No courts available")
     else:
-        if st.button("Generate Matches"):
-            # Generate matches
-            new_matches = sheets_mgr.generate_next_matches(active_players, court_count)
-            if new_matches:
-                st.success(f"Generated {len(new_matches)} new matches!")
-                st.rerun()
-            else:
-                st.error("Failed to generate matches")
+        # Count existing pending matches
+        pending_match_count = len(matches_df[matches_df[config.COL_MATCH_STATUS] == config.STATUS_PENDING])
+        max_pending_matches = int(court_count * 1.5)
+        
+        if pending_match_count >= max_pending_matches:
+            st.warning(f"Cannot generate new matches. Already have {pending_match_count} pending matches. Maximum allowed is {max_pending_matches} (1.5x the number of courts).")
+        else:
+            if st.button("Generate Matches"):
+                # Calculate how many new matches we can generate
+                available_slots = max_pending_matches - pending_match_count
+                
+                # Generate matches
+                new_matches = sheets_mgr.generate_next_matches(active_players, min(court_count, available_slots))
+                if new_matches:
+                    st.success(f"Generated {len(new_matches)} new matches!")
+                    st.rerun()
+                else:
+                    st.error("Failed to generate matches")
 
 # Display pending matches
 st.header("Pending Matches")
