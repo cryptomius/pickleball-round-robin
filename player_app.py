@@ -67,6 +67,15 @@ def main():
     st.title("Lakes Entrance Pickleball Round Robin")
     #st.subheader("Player View")
 
+    # Add custom CSS
+    st.markdown("""
+        <style>
+        .block-container {
+            padding: 1.5rem 1.4rem !important;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+
     # Initialize sheets manager
     sheets_mgr = SheetsManager()
 

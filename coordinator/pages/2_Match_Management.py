@@ -9,6 +9,20 @@ sheets_mgr = SheetsManager()
 
 st.title("Match Management")
 
+# Add custom CSS and hide sidebar
+st.markdown("""
+    <style>
+    .block-container {
+        padding: 1.5rem 1.4rem !important;
+    }
+    .appview-container section:first-child {
+        width: 250px !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+
+
 # Get active players for match generation
 players_df = sheets_mgr.read_sheet(config.SHEET_PLAYERS)
 active_players = players_df[players_df[config.COL_STATUS] == config.STATUS_PLAYER_ACTIVE]
@@ -92,7 +106,7 @@ else:
         max_pending_matches = int(court_count * 1.5)
         
         if pending_match_count >= max_pending_matches:
-            st.warning(f"Cannot generate new matches. Already have {pending_match_count} pending matches. Maximum allowed is {max_pending_matches} (1.5x the number of courts).")
+            st.warning(f"Cannot generate new matches. Already have {pending_match_count} pending matches.")
         else:
             if st.button("Generate Matches"):
                 # Calculate how many new matches we can generate

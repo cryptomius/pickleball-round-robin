@@ -10,6 +10,18 @@ st.set_page_config(
     layout="wide",
 )
 
+# Add custom CSS
+st.markdown("""
+    <style>
+    .block-container {
+        padding: 1.5rem 1.4rem !important;
+    }
+    .appview-container section:first-child {
+        width: 250px !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
 st.title("Pickleball Round Robin - Coordinator")
 st.write("Welcome to the Pickleball Round Robin Tournament Management System!")
 st.write("Please use the sidebar to navigate between different sections:")
