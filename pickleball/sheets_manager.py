@@ -436,7 +436,7 @@ class SheetsManager:
         current_date = pd.Timestamp.now()
         
         # Sort matches by date to count matches since a particular match
-        matches_df = matches_df.sort_values(config.COL_MATCH_DATE)
+        matches_df = matches_df.sort_values(config.COL_START_TIME)
         
         for idx, match in matches_df.iterrows():
             # Only check matches with all players still active
@@ -459,7 +459,7 @@ class SheetsManager:
                 matches_since = len(matches_df.loc[idx:][matches_df[config.COL_MATCH_STATUS] == config.STATUS_COMPLETED])
                 
                 # Check staleness based on time and matches played
-                match_date = pd.Timestamp(match[config.COL_MATCH_DATE])
+                match_date = pd.Timestamp(match[config.COL_START_TIME])
                 staleness = self.calculate_match_staleness(match_date, current_date, matches_since)
                 
                 # If match is still fresh, consider it a duplicate
