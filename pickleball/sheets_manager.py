@@ -1,3 +1,4 @@
+import streamlit as st
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 import pandas as pd
@@ -7,13 +8,10 @@ from . import config
 import random
 import os
 import json
-import streamlit as st
 
 class SheetsManager:
     def __init__(self):
         try:
-            import streamlit as st
-            
             # Try to get credentials from Streamlit secrets first
             if 'google_credentials_type' in st.secrets:
                 # Reconstruct credentials dict from flattened secrets
@@ -48,7 +46,7 @@ class SheetsManager:
             self.sheet = self.service.spreadsheets()
             self._last_modified = {}  # Track last modified time for each sheet
         except Exception as e:
-            print(f"Error initializing SheetsManager: {str(e)}")
+            st.write(f"Error initializing SheetsManager: {str(e)}")
             raise
 
     def get_sheet_modified_time(self, sheet_name):
@@ -176,7 +174,7 @@ class SheetsManager:
             ).execute()
             return True
         except Exception as e:
-            print(f"Error updating sheet: {str(e)}")
+            st.write(f"Error updating sheet: {str(e)}")
             return False
 
     def update_match_status(self, match_id, new_status):
@@ -206,7 +204,7 @@ class SheetsManager:
             result = self.update_sheet(config.SHEET_MATCHES, [matches_df.columns.tolist()] + matches_df.values.tolist())
             return result
         except Exception as e:
-            print(f"Error updating match status: {str(e)}")
+            st.write(f"Error updating match status: {str(e)}")
             return False
 
     def update_match_score(self, match_id, team1_score, team2_score):
@@ -301,7 +299,7 @@ class SheetsManager:
             
             return True
         except Exception as e:
-            print(f"Error updating match score: {str(e)}")
+            st.write(f"Error updating match score: {str(e)}")
             return False
 
     def get_active_players(self):
@@ -408,17 +406,107 @@ class SheetsManager:
             
             return True, f"Successfully added player '{player_name}'"
         except Exception as e:
+            st.write(f"Error adding player: {str(e)}")
             return False, f"Error adding player: {str(e)}"
+
+    def get_match_key(self, team1_players, team2_players):
+        """Create a unique key for a match that is the same regardless of player order"""
+        # Sort players within each team
+        team1_sorted = sorted(team1_players)
+        team2_sorted = sorted(team2_players)
+        # Sort teams to ensure consistent ordering
+        teams_sorted = sorted([tuple(team1_sorted), tuple(team2_sorted)])
+        # Create a single tuple of all players in a consistent order
+        return tuple(teams_sorted[0] + teams_sorted[1])
+
+    def calculate_match_staleness(self, match_date, current_date, matches_since):
+        """Calculate how 'stale' a match is (0.0 = fresh, 1.0 = very stale)
+        Takes into account both time passed and matches played since then
+        """
+        hours_passed = (current_date - match_date).total_seconds() / 3600
+        time_staleness = min(1.0, hours_passed / 2.0)  # Full time staleness after 2 hours
+        match_staleness = min(1.0, matches_since / 4.0)  # Full match staleness after 4 matches
+        
+        # Combine both factors, giving more weight to matches played
+        return 0.3 * time_staleness + 0.7 * match_staleness
+
+    def is_duplicate_match(self, matches_df, team1_players, team2_players):
+        """Check if this match combination exists and is still fresh"""
+        match_key = self.get_match_key(team1_players, team2_players)
+        current_date = pd.Timestamp.now()
+        
+        # Sort matches by date to count matches since a particular match
+        matches_df = matches_df.sort_values(config.COL_MATCH_DATE)
+        
+        for idx, match in matches_df.iterrows():
+            # Only check matches with all players still active
+            all_players = [
+                match[config.COL_TEAM1_PLAYER1], 
+                match[config.COL_TEAM1_PLAYER2],
+                match[config.COL_TEAM2_PLAYER1], 
+                match[config.COL_TEAM2_PLAYER2]
+            ]
+            if not all(p in team1_players + team2_players or self.is_player_active(p) for p in all_players):
+                continue
+                
+            existing_key = self.get_match_key(
+                [match[config.COL_TEAM1_PLAYER1], match[config.COL_TEAM1_PLAYER2]],
+                [match[config.COL_TEAM2_PLAYER1], match[config.COL_TEAM2_PLAYER2]]
+            )
+            
+            if match_key == existing_key:
+                # Count completed matches since this one
+                matches_since = len(matches_df.loc[idx:][matches_df[config.COL_MATCH_STATUS] == config.STATUS_COMPLETED])
+                
+                # Check staleness based on time and matches played
+                match_date = pd.Timestamp(match[config.COL_MATCH_DATE])
+                staleness = self.calculate_match_staleness(match_date, current_date, matches_since)
+                
+                # If match is still fresh, consider it a duplicate
+                if staleness < 0.7:  # Allow repeats after 70% staleness
+                    return True
+        
+        return False
 
     def generate_next_matches(self, active_players, court_count):
         """Generate optimal matches based on player history"""
         # Get existing matches to check who has played together
         matches_df = self.read_sheet(config.SHEET_MATCHES)
         
+        # Try to generate matches normally first
+        new_matches = self._generate_matches(active_players, court_count, matches_df)
+        
+        # If we couldn't generate any matches, all combinations might be used
+        if not new_matches and len(active_players) >= 4:
+            # Calculate total possible unique match combinations
+            n = len(active_players)
+            possible_combinations = (n * (n-1) * (n-2) * (n-3)) / 8  # Division by 8 because order doesn't matter within teams or between teams
+            
+            # Count actual unique match combinations in the sheet
+            unique_matches = set()
+            for _, match in matches_df.iterrows():
+                match_key = self.get_match_key(
+                    [match[config.COL_TEAM1_PLAYER1], match[config.COL_TEAM1_PLAYER2]],
+                    [match[config.COL_TEAM2_PLAYER1], match[config.COL_TEAM2_PLAYER2]]
+                )
+                unique_matches.add(match_key)
+            
+            # If we've used all possible combinations, clear the history and try again
+            if len(unique_matches) >= possible_combinations:
+                st.info("All possible match combinations have been used - starting a new round!")
+                new_matches = self._generate_matches(active_players, court_count, pd.DataFrame())  # Empty DataFrame = no history
+        
+        return new_matches
+
+    def _generate_matches(self, active_players, court_count, matches_df):
+        """Internal method to generate matches based on given history"""
         # Create matrices to track playing with and against separately
         partner_matrix = pd.DataFrame(0.0, index=active_players, columns=active_players, dtype=float)
         opponent_matrix = pd.DataFrame(0.0, index=active_players, columns=active_players, dtype=float)
         games_played = pd.Series(0, index=active_players)
+        
+        # Create a set to track unique match combinations
+        existing_match_combinations = set()
         
         # Weight recent matches more heavily using exponential decay
         total_matches = len(matches_df)
@@ -427,9 +515,13 @@ class SheetsManager:
             recency_weight = 0.25 + 0.75 * (idx + 1) / total_matches
             
             # Only consider matches that are completed, scheduled, or in progress
-            if match[config.COL_MATCH_STATUS] in [config.STATUS_COMPLETED, config.STATUS_SCHEDULED, config.STATUS_IN_PROGRESS]:
-                team1 = [match[config.COL_TEAM1_PLAYER1], match[config.COL_TEAM1_PLAYER2]]
-                team2 = [match[config.COL_TEAM2_PLAYER1], match[config.COL_TEAM2_PLAYER2]]
+            if match[config.COL_MATCH_STATUS] in [config.STATUS_COMPLETED, config.STATUS_SCHEDULED, config.STATUS_IN_PROGRESS, config.STATUS_PENDING]:
+                team1 = sorted([match[config.COL_TEAM1_PLAYER1], match[config.COL_TEAM1_PLAYER2]])
+                team2 = sorted([match[config.COL_TEAM2_PLAYER1], match[config.COL_TEAM2_PLAYER2]])
+                
+                # Add this match combination to our set
+                match_key = tuple(sorted(team1 + team2))
+                existing_match_combinations.add(match_key)
                 
                 # Update games played count
                 for player in team1 + team2:
@@ -464,7 +556,12 @@ class SheetsManager:
                 match[config.COL_TEAM2_PLAYER2]
             ])
         
-        # Remove busy players from available players
+        # Get pending matches in order
+        pending_matches = matches_df[
+            matches_df[config.COL_MATCH_STATUS] == config.STATUS_PENDING
+        ].sort_values(by=config.COL_MATCH_ID)
+        
+        # Get available players
         available_players = [p for p in active_players if p not in busy_players]
         
         # Generate matches
@@ -546,6 +643,12 @@ class SheetsManager:
             opponent2 = random.choice(best_opponents)
             available_players.remove(opponent2)
             
+            # Check if this would be a duplicate match
+            if self.is_duplicate_match(matches_df, [player1, partner], [opponent1, opponent2]):
+                # Put players back in available pool
+                available_players.extend([player1, partner, opponent1, opponent2])
+                continue
+
             # Get next match ID
             match_id_pattern = r'M(\d+)'
             existing_match_ids = matches_df[config.COL_MATCH_ID].str.extract(match_id_pattern, expand=False).astype(float)
@@ -575,6 +678,9 @@ class SheetsManager:
                 config.COL_TEAM1_SCORE: "",
                 config.COL_TEAM2_SCORE: ""
             }
+            
+            # Add the match to matches_df to check for future duplicates
+            matches_df = pd.concat([matches_df, pd.DataFrame([match])], ignore_index=True)
             matches.append(match)
             
             # Update games played for next iteration
@@ -589,6 +695,35 @@ class SheetsManager:
                 break
 
         if matches:
+            # Get pending matches in order
+            pending_matches = matches_df[
+                matches_df[config.COL_MATCH_STATUS] == config.STATUS_PENDING
+            ].sort_values(by=config.COL_MATCH_ID)
+            
+            # Filter out any new matches that would create duplicates with pending matches
+            filtered_matches = []
+            pending_combinations = set()
+            
+            # First, add all pending match combinations to our set
+            for match in pending_matches.to_dict('records'):
+                team1 = sorted([match[config.COL_TEAM1_PLAYER1], match[config.COL_TEAM1_PLAYER2]])
+                team2 = sorted([match[config.COL_TEAM2_PLAYER1], match[config.COL_TEAM2_PLAYER2]])
+                match_key = tuple(sorted(team1 + team2))
+                pending_combinations.add(match_key)
+            
+            # Then filter new matches
+            for match in matches:
+                team1 = sorted([match[config.COL_TEAM1_PLAYER1], match[config.COL_TEAM1_PLAYER2]])
+                team2 = sorted([match[config.COL_TEAM2_PLAYER1], match[config.COL_TEAM2_PLAYER2]])
+                match_key = tuple(sorted(team1 + team2))
+                
+                if match_key not in pending_combinations:
+                    filtered_matches.append(match)
+                    pending_combinations.add(match_key)
+            
+            # Combine pending matches with filtered new matches
+            all_matches = list(pending_matches.to_dict('records')) + filtered_matches
+            
             # Check for available courts
             matches_df = self.read_sheet(config.SHEET_MATCHES)
             courts_df = self.read_sheet(config.SHEET_COURTS)
@@ -602,14 +737,6 @@ class SheetsManager:
             available_courts = courts_df[
                 ~courts_df[config.COL_COURT_NUMBER].isin(busy_courts)
             ][config.COL_COURT_NUMBER].tolist()
-            
-            # Get pending matches in order
-            pending_matches = matches_df[
-                matches_df[config.COL_MATCH_STATUS] == config.STATUS_PENDING
-            ].sort_values(by=config.COL_MATCH_ID)
-            
-            # Combine pending matches with new matches
-            all_matches = list(pending_matches.to_dict('records')) + matches
             
             # Assign available courts to matches in order
             for i, match in enumerate(all_matches):
@@ -662,7 +789,7 @@ class SheetsManager:
             return True, "Match cancelled successfully"
             
         except Exception as e:
-            print(f"Error cancelling match: {str(e)}")
+            st.write(f"Error cancelling match: {str(e)}")
             return False, f"Error cancelling match: {str(e)}"
 
     def handle_player_inactivation(self, player_name):
