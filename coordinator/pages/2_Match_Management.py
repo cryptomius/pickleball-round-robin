@@ -18,6 +18,10 @@ st.markdown("""
     .appview-container section:first-child {
         width: 250px !important;
     }
+    /* Hide clear value button in number inputs */
+    button[data-testid="clear-number-input"] {
+        display: none !important;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -68,14 +72,16 @@ if not courts_df.empty:
                 with st.form(form_key):
                     score_col1, score_col2 = st.columns(2)
                     with score_col1:
-                        team1_score = st.number_input("Team 1 Score", min_value=0, max_value=15, value=0, key=f"team1_score_{form_key}")
+                        team1_score = st.number_input("Team 1 Score", min_value=0, max_value=15, value=None, placeholder="", key=f"team1_score_{form_key}")
                     with score_col2:
-                        team2_score = st.number_input("Team 2 Score", min_value=0, max_value=15, value=0, key=f"team2_score_{form_key}")
+                        team2_score = st.number_input("Team 2 Score", min_value=0, max_value=15, value=None, placeholder="", key=f"team2_score_{form_key}")
                     
                     # Submit button inside the form
                     submitted = st.form_submit_button("Submit Score")
                     if submitted:
-                        if team1_score == team2_score:
+                        if team1_score is None or team2_score is None:
+                            st.error("Please enter scores for both teams")
+                        elif team1_score == team2_score:
                             st.error("Scores cannot be equal")
                         else:
                             # Update scores
