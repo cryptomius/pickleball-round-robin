@@ -174,8 +174,7 @@ class SheetsManager:
     def update_sheet(self, range_name, values):
         """Update a sheet with new values, clearing any existing data first."""
         try:
-            # Get expected headers for this sheet
-            expected_header = None
+            # Get the expected header based on the sheet
             if range_name == config.SHEET_PLAYERS:
                 expected_header = [
                     config.COL_NAME,
@@ -205,6 +204,22 @@ class SheetsManager:
             elif range_name == config.SHEET_SCORES:
                 expected_header = [config.COL_MATCH_ID, config.COL_NAME, config.COL_TOTAL_POINTS]
 
+            # First, read the current header
+            result = self.sheet.values().get(
+                spreadsheetId=config.SPREADSHEET_ID,
+                range=f"{range_name}!A1:Z1"
+            ).execute()
+            current_header = result.get('values', [[]])[0] if result.get('values') else []
+
+            # If header is missing or different, update it
+            if not current_header or current_header != expected_header:
+                self.sheet.values().update(
+                    spreadsheetId=config.SPREADSHEET_ID,
+                    range=f"{range_name}!A1",
+                    valueInputOption='RAW',
+                    body={'values': [expected_header]}
+                ).execute()
+
             # Clear the existing content except the header row
             self.sheet.values().clear(
                 spreadsheetId=config.SPREADSHEET_ID,
@@ -213,13 +228,14 @@ class SheetsManager:
             ).execute()
 
             # Update with new values, starting from row 2
-            values_to_write = values[1:]  # Skip the header row since we're preserving it
-            self.sheet.values().update(
-                spreadsheetId=config.SPREADSHEET_ID,
-                range=f"{range_name}!A2",  # Start from row 2
-                valueInputOption='RAW',
-                body={'values': values_to_write}
-            ).execute()
+            if len(values) > 1:  # Only update if there are values besides the header
+                values_to_write = values[1:]  # Skip the header row since we're preserving it
+                self.sheet.values().update(
+                    spreadsheetId=config.SPREADSHEET_ID,
+                    range=f"{range_name}!A2",  # Start from row 2
+                    valueInputOption='RAW',
+                    body={'values': values_to_write}
+                ).execute()
 
             return True
 
