@@ -217,29 +217,32 @@ def main():
                  (matches_df[config.COL_TEAM2_PLAYER1] == selected_player) |
                  (matches_df[config.COL_TEAM2_PLAYER2] == selected_player)) &
                 (matches_df[config.COL_MATCH_STATUS] == config.STATUS_COMPLETED)
-            ]
+            ].sort_values(by=config.COL_END_TIME)  # Sort by end time to get chronological order
             
+            st.write("### Completed Matches")
             if not completed_matches.empty:
-                st.write("### Completed Matches")
-                for _, match in completed_matches.iterrows():
-                    team1_score = match[config.COL_TEAM1_SCORE] if pd.notna(match[config.COL_TEAM1_SCORE]) else "-"
-                    team2_score = match[config.COL_TEAM2_SCORE] if pd.notna(match[config.COL_TEAM2_SCORE]) else "-"
-                    
+                for match_num, (_, match) in enumerate(completed_matches.iterrows(), 1):
                     court_number = match[config.COL_COURT_NUMBER]
                     if pd.isna(court_number) or court_number == "":
                         court_display = "Court TBC"
                     else:
                         court_display = f"Court {str(court_number).replace('Court ', '')}"
                     
-                    # Format the match display
+                    # Determine if the player won
+                    team1_score = int(match[config.COL_TEAM1_SCORE])
+                    team2_score = int(match[config.COL_TEAM2_SCORE])
+                    player_in_team1 = selected_player in [match[config.COL_TEAM1_PLAYER1], match[config.COL_TEAM1_PLAYER2]]
+                    player_won = (player_in_team1 and team1_score > team2_score) or (not player_in_team1 and team2_score > team1_score)
+                    result_emoji = "🏆" if player_won else "💪"
+                    
                     st.markdown(
-                        f"**{match[config.COL_MATCH_ID]}** ({court_display}) - {match[config.COL_MATCH_TYPE]}  \n"
+                        f"**Match {match_num}** ({court_display}) - {match[config.COL_MATCH_TYPE]} {result_emoji}  \n"
                         f"{match[config.COL_TEAM1_PLAYER1]} & {match[config.COL_TEAM1_PLAYER2]} vs "
                         f"{match[config.COL_TEAM2_PLAYER1]} & {match[config.COL_TEAM2_PLAYER2]}  \n"
                         f"Score: {team1_score} - {team2_score}"
                     )
             else:
-                st.write("No completed matches yet")
+                st.info("You haven't completed any matches yet")
 
     # Always display the QR code at the bottom
     display_qr_code()
