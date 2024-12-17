@@ -581,10 +581,24 @@ class SheetsManager:
                 (matches_df[config.COL_COURT_NUMBER] != "")  # Must not be empty string
             ]
             
+            # Get players who are currently in active matches
+            busy_players = set()
+            for _, match in active_matches.iterrows():
+                players = [
+                    match[config.COL_TEAM1_PLAYER1],
+                    match[config.COL_TEAM1_PLAYER2],
+                    match[config.COL_TEAM2_PLAYER1],
+                    match[config.COL_TEAM2_PLAYER2]
+                ]
+                busy_players.update(p for p in players if pd.notna(p))
+            
             used_courts = set(str(court) for court in active_matches[config.COL_COURT_NUMBER] if pd.notna(court) and court != "")
             
             # Get available courts (1-6)
             available_courts = [str(i) for i in range(1, 7) if str(i) not in used_courts]
+            
+            if not available_courts:
+                return False
             
             # Find pending matches
             pending_matches = matches_df[
@@ -598,13 +612,27 @@ class SheetsManager:
             updates_made = False
             current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
-            # For each pending match, assign a court if available
+            # For each pending match, assign a court if available and players aren't busy
             for idx, match in pending_matches.iterrows():
                 match_id = match[config.COL_MATCH_ID]
                 
                 # Skip if match already has a valid court number
                 court_number = match[config.COL_COURT_NUMBER]
                 if pd.notna(court_number) and court_number != "":
+                    continue
+                
+                # Check if any players in this match are already playing
+                match_players = {
+                    match[config.COL_TEAM1_PLAYER1],
+                    match[config.COL_TEAM1_PLAYER2],
+                    match[config.COL_TEAM2_PLAYER1],
+                    match[config.COL_TEAM2_PLAYER2]
+                }
+                match_players = {p for p in match_players if pd.notna(p)}  # Remove any NaN values
+                
+                # If any players are busy, skip this match
+                if match_players & busy_players:
+                    #st.write(f"Skipping match {match_id} - players already in active matches")
                     continue
                 
                 if available_courts:  # We have courts available
@@ -615,6 +643,9 @@ class SheetsManager:
                     matches_df.loc[idx, config.COL_MATCH_STATUS] = config.STATUS_SCHEDULED
                     matches_df.loc[idx, config.COL_START_TIME] = current_time
                     updates_made = True
+                    
+                    # Add these players to busy_players for subsequent matches
+                    busy_players.update(match_players)
             
             # Update the sheet if changes were made
             if updates_made:

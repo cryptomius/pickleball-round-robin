@@ -41,6 +41,33 @@ st.markdown("""
         font-size: 1.2em;
         margin-left: 5px;
     }
+    /* Player list styling */
+    .player-header {
+        background-color: #e6e6e6;
+        padding: 0.5rem;
+        font-weight: bold;
+        margin-bottom: 0.5rem;
+        display: flex;
+    }
+    .player-row {
+        padding: 0.5rem;
+        display: flex;
+        align-items: center;
+        background-color: #f2f2f2;
+    }
+    .player-name {
+        flex: 3;
+    }
+    .player-action {
+        flex: 1;
+        text-align: center;
+    }
+    div:has(.player-row) + div {
+        margin-top: -40px;
+    }
+    div[data-testid="column"]:has(h3#inactive-players) {
+        margin-top: 0;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -96,7 +123,7 @@ if st.session_state.show_match_removal:
                     
                     # Now assign all freed courts to pending matches
                     if freed_courts:
-                        sheets_mgr.assign_pending_matches_to_courts(freed_courts)
+                        sheets_mgr.assign_courts_to_pending_matches()
                     
                     # Update player status
                     if sheets_mgr.update_player_status(player_name, config.STATUS_INACTIVE):
@@ -129,7 +156,7 @@ if st.session_state.show_match_removal:
                         
                         # Assign freed courts to pending matches
                         if freed_courts:
-                            sheets_mgr.assign_pending_matches_to_courts(freed_courts)
+                            sheets_mgr.assign_courts_to_pending_matches()
                     
                     # Update player status
                     if sheets_mgr.update_player_status(player_name, config.STATUS_INACTIVE):
@@ -161,7 +188,7 @@ if st.session_state.show_match_removal:
                 
                 # Assign freed courts to pending matches
                 if freed_courts:
-                    sheets_mgr.assign_pending_matches_to_courts(freed_courts)
+                    sheets_mgr.assign_courts_to_pending_matches()
             
             # Update player status
             if sheets_mgr.update_player_status(player_name, config.STATUS_INACTIVE):
@@ -212,11 +239,26 @@ col1, col2 = st.columns(2)
 with col1:
     st.subheader("Active Players")
     active_players = players_df[players_df[config.COL_STATUS] == config.STATUS_ACTIVE]
+    
+    # Create header
+    st.markdown(
+        '<div class="player-header">'
+        '<div class="player-name">Player Name</div>'
+        '<div class="player-action">Action</div>'
+        '</div>',
+        unsafe_allow_html=True
+    )
+    
     for _, player in active_players.iterrows():
+        gender_icon = "♀️" if player[config.COL_GENDER] == config.GENDER_FEMALE else "♂️"
+        st.markdown(
+            f'<div class="player-row">'
+            f'<div class="player-name">{player[config.COL_NAME]} {gender_icon}</div>'
+            f'<div class="player-action"></div>'
+            f'</div>',
+            unsafe_allow_html=True
+        )
         col_name, col_button = st.columns([3, 1])
-        with col_name:
-            gender_icon = "♀️" if player[config.COL_GENDER] == config.GENDER_FEMALE else "♂️"
-            st.write(f"{player[config.COL_NAME]} {gender_icon}")
         with col_button:
             if st.button("Deactivate", key=f"deactivate_{player[config.COL_NAME]}"):
                 st.session_state.player_to_deactivate = player[config.COL_NAME]
@@ -244,11 +286,26 @@ with col1:
 with col2:
     st.subheader("Inactive Players")
     inactive_players = players_df[players_df[config.COL_STATUS] == config.STATUS_INACTIVE]
+    
+    # Create header
+    st.markdown(
+        '<div class="player-header">'
+        '<div class="player-name">Player Name</div>'
+        '<div class="player-action">Action</div>'
+        '</div>',
+        unsafe_allow_html=True
+    )
+    
     for _, player in inactive_players.iterrows():
+        gender_icon = "♀️" if player[config.COL_GENDER] == config.GENDER_FEMALE else "♂️"
+        st.markdown(
+            f'<div class="player-row">'
+            f'<div class="player-name">{player[config.COL_NAME]} {gender_icon}</div>'
+            f'<div class="player-action"></div>'
+            f'</div>',
+            unsafe_allow_html=True
+        )
         col_name, col_button = st.columns([3, 1])
-        with col_name:
-            gender_icon = "♀️" if player[config.COL_GENDER] == config.GENDER_FEMALE else "♂️"
-            st.write(f"{player[config.COL_NAME]} {gender_icon}")
         with col_button:
             if st.button("Activate", key=f"activate_{player[config.COL_NAME]}"):
                 sheets_mgr.update_player_status(player[config.COL_NAME], config.STATUS_ACTIVE)
