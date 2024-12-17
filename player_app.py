@@ -13,24 +13,6 @@ import io
 
 def display_qr_code():
     """Display QR code at the bottom of the page"""
-    st.markdown("---")  # Add a separator
-    st.subheader("Let someone scan this code to view the player app")
-    
-    # Generate QR code for the current page URL
-    qr = qrcode.QRCode(version=1, box_size=10, border=5)
-    qr.add_data("https://pickleball-tournament.streamlit.app/")  # Get the current URL
-    qr.make(fit=True)
-    
-    # Create the QR code image
-    img = qr.make_image(fill_color="black", back_color="white")
-    
-    # Convert PIL image to bytes
-    img_byte_arr = io.BytesIO()
-    img.save(img_byte_arr, format='PNG')
-    img_byte_arr = img_byte_arr.getvalue()
-    
-    # Display the QR code
-    st.image(img_byte_arr)
 
     # Add explanation of scoring and matching system
     st.markdown("""
@@ -57,6 +39,25 @@ def display_qr_code():
     - Mixed partnerships help you meet and play with everyone
     - Perfect for a social tournament where fun and fairness come first!
     """)
+    
+    st.markdown("---")  # Add a separator
+    st.subheader("Let someone scan this code to view the player app")
+    
+    # Generate QR code for the current page URL
+    qr = qrcode.QRCode(version=1, box_size=10, border=5)
+    qr.add_data("https://pickleball-tournament.streamlit.app/")  # Get the current URL
+    qr.make(fit=True)
+    
+    # Create the QR code image
+    img = qr.make_image(fill_color="black", back_color="white")
+    
+    # Convert PIL image to bytes
+    img_byte_arr = io.BytesIO()
+    img.save(img_byte_arr, format='PNG')
+    img_byte_arr = img_byte_arr.getvalue()
+    
+    # Display the QR code
+    st.image(img_byte_arr)
 
 def main():
     # Set page auto refresh interval (milliseconds)
