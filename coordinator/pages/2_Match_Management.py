@@ -22,7 +22,47 @@ st.markdown("""
     button[data-testid="clear-number-input"] {
         display: none !important;
     }
+    /* Pending matches table styling */
+    .matches-table {
+        width: 100%;
+        margin-bottom: 1rem;
+    }
+    .matches-header {
+        background-color: #e6e6e6;
+        padding: 0.5rem;
+        font-weight: bold;
+        margin-bottom: 0.5rem;
+        display: flex;
+    }
+    .matches-row {
+        padding: 0.5rem;
+        display: flex;
+        align-items: center;
+    }
+    .matches-row {
+        background-color: #f2f2f2;
+    }
+    .order-num {
+        flex: 0.5;
+    }
+    .match-type {
+        flex: 1;
+    }
+    .team1 {
+        flex: 2;
+    }
+    .team2 {
+        flex: 2;
+    }
+    .actions {
+        flex: 1;
+        text-align: center;
+    }
+    div:has(.matches-row) + div {
+        margin-top: -40px;
+    }
     </style>
+    
 """, unsafe_allow_html=True)
 
 
@@ -90,6 +130,10 @@ if len(active_courts) > 0:
                             st.error("Please enter scores for both teams")
                         elif team1_score == team2_score:
                             st.error("Scores cannot be equal")
+                        elif max(team1_score, team2_score) < 11:
+                            st.error("At least one team must reach 11 points")
+                        elif abs(team1_score - team2_score) < 2:
+                            st.error("Winning team must win by at least 2 points")
                         else:
                             # Update scores
                             if sheets_mgr.update_match_score(current_match[config.COL_MATCH_ID], team1_score, team2_score):
@@ -101,8 +145,56 @@ if len(active_courts) > 0:
             else:
                 st.write("No active match")
 else:
-    # Default to 6 courts if no active matches
+    # Default to COURTS_COUNT courts if no active matches
     st.info("No active matches on courts")
+
+
+# Display pending matches
+st.header("Pending Matches")
+st.write("**Awaiting court assignment**")
+
+pending_matches = matches_df[matches_df[config.COL_MATCH_STATUS] == config.STATUS_PENDING].head(10)
+if not pending_matches.empty:
+    # Create header
+    st.markdown(
+        '<div class="matches-header">'
+        '<div class="order-num">#</div>'
+        '<div class="match-type">Match Type</div>'
+        '<div class="team1">Team 1</div>'
+        '<div class="team2">Team 2</div>'
+        '<div class="actions">Actions</div>'
+        '</div>',
+        unsafe_allow_html=True
+    )
+    
+    # Display matches
+    for order_num, (idx, match) in enumerate(pending_matches.iterrows(), 1):
+        team1 = f"{match[config.COL_TEAM1_PLAYER1]} & {match[config.COL_TEAM1_PLAYER2]}"
+        team2 = f"{match[config.COL_TEAM2_PLAYER1]} & {match[config.COL_TEAM2_PLAYER2]}"
+        
+        st.markdown(
+            f'<div class="matches-row">'
+            f'<div class="order-num">{order_num}</div>'
+            f'<div class="match-type">{match[config.COL_MATCH_TYPE]}</div>'
+            f'<div class="team1">{team1}</div>'
+            f'<div class="team2">{team2}</div>'
+            f'<div class="actions"></div>'
+            f'</div>',
+            unsafe_allow_html=True
+        )
+        # Place the button in the actions column
+        order_col, col1, col2, col3, button_col = st.columns([0.5, 1, 2, 2, 1])
+        with button_col:
+            if st.button("Cancel Match", key=f"cancel_pending_{match[config.COL_MATCH_ID]}_{idx}"):
+                success, message = sheets_mgr.cancel_match(match[config.COL_MATCH_ID])
+                if success:
+                    st.success(message)
+                    time.sleep(1)
+                    st.rerun()
+                else:
+                    st.error(message)
+else:
+    st.write("No pending matches")
 
 # Match Generation
 st.header("Generate Matches")
@@ -136,39 +228,16 @@ else:
                 else:
                     st.error("Failed to generate matches. Try again or check if all players have already played together.")
                 
-                # Get list of available courts (1-6 if no active matches)
+                # Get list of available courts (1-COURTS_COUNT if no active matches)
                 active_courts = matches_df[
                     matches_df[config.COL_MATCH_STATUS].isin([config.STATUS_SCHEDULED, config.STATUS_IN_PROGRESS])
                 ][config.COL_COURT_NUMBER].unique()
                 
                 available_courts = []
-                for i in range(1, 7):  # Courts 1-6
+                for i in range(1, config.COURTS_COUNT + 1):  # Courts 1-COURTS_COUNT
                     if str(i) not in active_courts:
                         available_courts.append(i)
                 
                 # Assign courts to new matches if courts are available
                 if available_courts:
                     sheets_mgr.assign_pending_matches_to_courts(available_courts)
-
-# Display pending matches
-st.header("Pending Matches")
-st.write("**Awaiting court assignment**")
-
-pending_matches = matches_df[matches_df[config.COL_MATCH_STATUS] == config.STATUS_PENDING].head(10)
-if not pending_matches.empty:
-    for idx, match in pending_matches.iterrows():
-        match_col, cancel_col = st.columns([4, 1])
-        with match_col:
-            st.write(f"{match[config.COL_MATCH_TYPE]}: T1: {match[config.COL_TEAM1_PLAYER1]} & {match[config.COL_TEAM1_PLAYER2]} vs "
-                    f"T2: {match[config.COL_TEAM2_PLAYER1]} & {match[config.COL_TEAM2_PLAYER2]}")
-        with cancel_col:
-            if st.button("Cancel Match", key=f"cancel_pending_{match[config.COL_MATCH_ID]}_{idx}"):
-                success, message = sheets_mgr.cancel_match(match[config.COL_MATCH_ID])
-                if success:
-                    st.success(message)
-                    time.sleep(1)
-                    st.rerun()
-                else:
-                    st.error(message)
-else:
-    st.write("No pending matches")
