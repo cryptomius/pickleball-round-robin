@@ -16,7 +16,7 @@ def initialize_sheets():
         existing_sheets = [sheet['properties']['title'] for sheet in spreadsheet['sheets']]
         
         # Define the sheets we need
-        required_sheets = ["Players", "Matches", "Courts", "Scores", "Settings"]
+        required_sheets = ["Players", "Matches", "Scores"]
         
         # Create any missing sheets
         requests = []
@@ -53,31 +53,8 @@ def initialize_sheets():
              config.COL_MATCH_STATUS]
         ]
 
-        courts_headers = [
-            [config.COL_COURT_NUMBER, config.COL_STATUS, config.COL_MATCH_ID]
-        ]
-        
-        # Initialize courts data with 6 courts
-        courts_data = [
-            [f"Court {i}", config.STATUS_COURT_ACTIVE, ""] for i in range(1, 7)
-        ]
-
         scores_headers = [
             ["Match ID", "Player Name", "Total Points"]
-        ]
-
-        settings_data = [
-            ["Setting", "Value"],
-            ["Tournament Date", "2025-01-03"],
-            ["Start Time", "10:00"],
-            ["Lunch Start", "12:00"],
-            ["Lunch Duration", "60"],
-            ["Max Duration", "360"],
-            ["Courts Count", "6"],
-            ["Points Win", "2"],
-            ["Points Loss", "1"],
-            ["Bonus Point Per Diff", "0.1"],
-            ["Max Bonus Points", "1.0"]
         ]
 
         # Update each sheet
@@ -97,23 +74,9 @@ def initialize_sheets():
 
         sheets.values().update(
             spreadsheetId=config.SPREADSHEET_ID,
-            range="Courts!A1",
-            valueInputOption="RAW",
-            body={"values": courts_headers + courts_data}
-        ).execute()
-
-        sheets.values().update(
-            spreadsheetId=config.SPREADSHEET_ID,
             range="Scores!A1",
             valueInputOption="RAW",
             body={"values": scores_headers}
-        ).execute()
-
-        sheets.values().update(
-            spreadsheetId=config.SPREADSHEET_ID,
-            range="Settings!A1",
-            valueInputOption="RAW",
-            body={"values": settings_data}
         ).execute()
 
         # Format headers (make them bold and freeze them)

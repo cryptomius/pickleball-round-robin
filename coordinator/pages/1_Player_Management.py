@@ -21,8 +21,8 @@ if 'scheduled_matches' not in st.session_state:
     st.session_state.scheduled_matches = None
 if 'new_player_input' not in st.session_state:
     st.session_state.new_player_input = ""
-if 'is_woman' not in st.session_state:
-    st.session_state.is_woman = False
+if 'player_gender' not in st.session_state:
+    st.session_state.player_gender = config.GENDER_MALE
 if 'form_submitted' not in st.session_state:
     st.session_state.form_submitted = False
 
@@ -36,6 +36,10 @@ st.markdown("""
     }
     .appview-container section:first-child {
         width: 250px !important;
+    }
+    .gender-icon {
+        font-size: 1.2em;
+        margin-left: 5px;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -95,8 +99,14 @@ if st.session_state.show_match_removal:
                         sheets_mgr.assign_pending_matches_to_courts(freed_courts)
                     
                     # Update player status
-                    players_df.loc[players_df[config.COL_NAME] == player_name, config.COL_STATUS] = config.STATUS_INACTIVE
-                    sheets_mgr.update_sheet(config.SHEET_PLAYERS, [players_df.columns.tolist()] + players_df.values.tolist())
+                    if sheets_mgr.update_player_status(player_name, config.STATUS_INACTIVE):
+                        # Handle any active/scheduled matches
+                        success, message = sheets_mgr.handle_player_inactivation(player_name)
+                        if success:
+                            st.success(f"Player marked as inactive. {message}")
+                            st.experimental_rerun()
+                        else:
+                            st.error(f"Error handling player matches: {message}")
                     
                     # Reset session state
                     st.session_state.show_match_removal = False
@@ -122,8 +132,14 @@ if st.session_state.show_match_removal:
                             sheets_mgr.assign_pending_matches_to_courts(freed_courts)
                     
                     # Update player status
-                    players_df.loc[players_df[config.COL_NAME] == player_name, config.COL_STATUS] = config.STATUS_INACTIVE
-                    sheets_mgr.update_sheet(config.SHEET_PLAYERS, [players_df.columns.tolist()] + players_df.values.tolist())
+                    if sheets_mgr.update_player_status(player_name, config.STATUS_INACTIVE):
+                        # Handle any active/scheduled matches
+                        success, message = sheets_mgr.handle_player_inactivation(player_name)
+                        if success:
+                            st.success(f"Player marked as inactive. {message}")
+                            st.experimental_rerun()
+                        else:
+                            st.error(f"Error handling player matches: {message}")
                     
                     # Reset session state
                     st.session_state.show_match_removal = False
@@ -148,8 +164,14 @@ if st.session_state.show_match_removal:
                     sheets_mgr.assign_pending_matches_to_courts(freed_courts)
             
             # Update player status
-            players_df.loc[players_df[config.COL_NAME] == player_name, config.COL_STATUS] = config.STATUS_INACTIVE
-            sheets_mgr.update_sheet(config.SHEET_PLAYERS, [players_df.columns.tolist()] + players_df.values.tolist())
+            if sheets_mgr.update_player_status(player_name, config.STATUS_INACTIVE):
+                # Handle any active/scheduled matches
+                success, message = sheets_mgr.handle_player_inactivation(player_name)
+                if success:
+                    st.success(f"Player marked as inactive. {message}")
+                    st.experimental_rerun()
+                else:
+                    st.error(f"Error handling player matches: {message}")
             
             # Reset session state
             st.session_state.show_match_removal = False
@@ -163,52 +185,71 @@ st.header("Add New Player")
 
 if st.session_state.form_submitted:
     st.session_state.new_player_input = ""
-    st.session_state.is_woman = False
-    st.session_state.form_submitted = False
-    st.rerun()
+    st.session_state.player_gender = config.GENDER_MALE
 
-with st.form("add_player"):
-    new_player = st.text_input("New Player Name", key="new_player_input")
-    is_woman = st.checkbox("Woman Player", key="is_woman")
+with st.form("add_player_form"):
+    new_player = st.text_input("Player Name", key="new_player_input", value=st.session_state.new_player_input)
+    gender = st.radio("Gender", [config.GENDER_MALE, config.GENDER_FEMALE], 
+                     format_func=lambda x: "Male" if x == config.GENDER_MALE else "Female",
+                     horizontal=True,
+                     key="player_gender")
+    
     submitted = st.form_submit_button("Add Player")
-    if submitted and new_player:
-        success, message = sheets_mgr.add_player(new_player, is_woman)
-        if success:
-            st.success(message)
+    if submitted and new_player.strip():
+        if sheets_mgr.add_player(new_player.strip(), gender == config.GENDER_FEMALE):
+            st.success(f"Added {new_player}")
             st.session_state.form_submitted = True
             st.rerun()
         else:
-            st.error(message)
+            st.error("Failed to add player")
 
-# Display players section with status toggles
-st.header("Players")
-if not players_df.empty:
-    for i, (_, player) in enumerate(players_df.iterrows()):
-        col1, col2, col3 = st.columns([3, 1, 1])
-        with col1:
-            status = "✅" if player[config.COL_STATUS] == config.STATUS_ACTIVE else "❌"
-            gender = "♀️" if player.get(config.COL_GENDER, "") == "W" else ""
-            st.write(f"{status} {player[config.COL_NAME]} {gender}")
-        with col2:
-            if st.button("Toggle Status", key=f"toggle_{i}"):
-                new_status = config.STATUS_INACTIVE if player[config.COL_STATUS] == config.STATUS_ACTIVE else config.STATUS_ACTIVE
-                
-                # If marking player as inactive, handle their matches
-                if new_status == config.STATUS_INACTIVE:
-                    current_matches, scheduled_matches = sheets_mgr.handle_player_inactivation(player[config.COL_NAME])
-                    if current_matches is not None or scheduled_matches is not None:
-                        st.session_state.show_match_removal = True
-                        st.session_state.player_to_deactivate = player[config.COL_NAME]
-                        st.session_state.current_matches = current_matches
-                        st.session_state.scheduled_matches = scheduled_matches
-                        st.rerun()
-                    else:
-                        # No matches to handle, just update status
-                        players_df.loc[players_df[config.COL_NAME] == player[config.COL_NAME], config.COL_STATUS] = new_status
-                        sheets_mgr.update_sheet(config.SHEET_PLAYERS, [players_df.columns.tolist()] + players_df.values.tolist())
-                        st.rerun()
-                else:
-                    # Just activating the player
-                    players_df.loc[players_df[config.COL_NAME] == player[config.COL_NAME], config.COL_STATUS] = new_status
-                    sheets_mgr.update_sheet(config.SHEET_PLAYERS, [players_df.columns.tolist()] + players_df.values.tolist())
-                    st.rerun()
+# Display Players
+st.header("Current Players")
+
+# Create two columns for active and inactive players
+col1, col2 = st.columns(2)
+
+with col1:
+    st.subheader("Active Players")
+    active_players = players_df[players_df[config.COL_STATUS] == config.STATUS_ACTIVE]
+    for _, player in active_players.iterrows():
+        col_name, col_button = st.columns([3, 1])
+        with col_name:
+            gender_icon = "♀️" if player[config.COL_GENDER] == config.GENDER_FEMALE else "♂️"
+            st.write(f"{player[config.COL_NAME]} {gender_icon}")
+        with col_button:
+            if st.button("Deactivate", key=f"deactivate_{player[config.COL_NAME]}"):
+                st.session_state.player_to_deactivate = player[config.COL_NAME]
+                # Get current and scheduled matches for this player
+                matches_df = sheets_mgr.read_sheet(config.SHEET_MATCHES)
+                current_matches = matches_df[
+                    (matches_df[config.COL_MATCH_STATUS].isin([config.STATUS_SCHEDULED, config.STATUS_IN_PROGRESS])) &
+                    ((matches_df[config.COL_TEAM1_PLAYER1] == player[config.COL_NAME]) |
+                     (matches_df[config.COL_TEAM1_PLAYER2] == player[config.COL_NAME]) |
+                     (matches_df[config.COL_TEAM2_PLAYER1] == player[config.COL_NAME]) |
+                     (matches_df[config.COL_TEAM2_PLAYER2] == player[config.COL_NAME]))
+                ]
+                scheduled_matches = matches_df[
+                    (matches_df[config.COL_MATCH_STATUS] == config.STATUS_PENDING) &
+                    ((matches_df[config.COL_TEAM1_PLAYER1] == player[config.COL_NAME]) |
+                     (matches_df[config.COL_TEAM1_PLAYER2] == player[config.COL_NAME]) |
+                     (matches_df[config.COL_TEAM2_PLAYER1] == player[config.COL_NAME]) |
+                     (matches_df[config.COL_TEAM2_PLAYER2] == player[config.COL_NAME]))
+                ]
+                st.session_state.current_matches = current_matches
+                st.session_state.scheduled_matches = scheduled_matches
+                st.session_state.show_match_removal = True
+                st.rerun()
+
+with col2:
+    st.subheader("Inactive Players")
+    inactive_players = players_df[players_df[config.COL_STATUS] == config.STATUS_INACTIVE]
+    for _, player in inactive_players.iterrows():
+        col_name, col_button = st.columns([3, 1])
+        with col_name:
+            gender_icon = "♀️" if player[config.COL_GENDER] == config.GENDER_FEMALE else "♂️"
+            st.write(f"{player[config.COL_NAME]} {gender_icon}")
+        with col_button:
+            if st.button("Activate", key=f"activate_{player[config.COL_NAME]}"):
+                sheets_mgr.update_player_status(player[config.COL_NAME], config.STATUS_ACTIVE)
+                st.rerun()

@@ -22,9 +22,7 @@ SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 # Sheet Names
 SHEET_PLAYERS = "Players"
 SHEET_MATCHES = "Matches"
-SHEET_COURTS = "Courts"
 SHEET_SCORES = "Scores"
-SHEET_SETTINGS = "Settings"
 
 # Column Names
 # Players Sheet
@@ -49,27 +47,28 @@ COL_END_TIME = "End Time"
 COL_TEAM1_SCORE = "Team 1 Score"
 COL_TEAM2_SCORE = "Team 2 Score"
 COL_MATCH_STATUS = "Match Status"
-
-# Courts Sheet
-COL_COURT_NUMBER = "Court Number"
-COL_COURT_NAME = "Court Name"
-COL_COURT_STATUS = "Court Status"
-COL_STATUS = "Status"
-COL_MATCH_ID = "Match ID"
+COL_MATCH_TYPE = "Match Type"  # New column for match type
 
 # Status Values
 STATUS_ACTIVE = "Active"
 STATUS_INACTIVE = "Inactive"
-STATUS_PENDING = "Pending"
-STATUS_SCHEDULED = "Scheduled"
-STATUS_IN_PROGRESS = "In Progress"
-STATUS_COMPLETED = "Completed"
-STATUS_CANCELLED = "Cancelled"
+
+# Gender Values
+GENDER_MALE = "M"
+GENDER_FEMALE = "F"
+
+# Match Types
+MATCH_TYPE_MENS = "Mens"
+MATCH_TYPE_WOMENS = "Womens"
+MATCH_TYPE_MIXED = "Mixed"
 
 # Player Status Values
 STATUS_PLAYER_ACTIVE = "Active"
 STATUS_PLAYER_INACTIVE = "Inactive"
 
-# Court Status Values
-STATUS_COURT_ACTIVE = "Active"
-STATUS_COURT_INACTIVE = "Inactive"
+# Match Status Values
+STATUS_PENDING = "Pending"
+STATUS_SCHEDULED = "Scheduled"
+STATUS_IN_PROGRESS = "In Progress"
+STATUS_COMPLETED = "Completed"
+STATUS_CANCELLED = "Cancelled"

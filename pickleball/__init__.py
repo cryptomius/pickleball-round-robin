@@ -1,1 +1,7 @@
-
+from .config import (
+    GENDER_MALE,
+    GENDER_FEMALE,
+    MATCH_TYPE_MENS,
+    MATCH_TYPE_WOMENS,
+    MATCH_TYPE_MIXED
+)

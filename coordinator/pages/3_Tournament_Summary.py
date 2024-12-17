@@ -60,7 +60,7 @@ if not players_df.empty:
         
         # Display standings
         for i, (_, player) in enumerate(active_players.iterrows()):
-            gender_icon = "♀️" if player.get(config.COL_GENDER, "") == "W" else ""
+            gender_icon = "♀️" if player[config.COL_GENDER] == config.GENDER_FEMALE else "♂️"
             st.write(
                 f"{i+1}. {player[config.COL_NAME]} {gender_icon} - "
                 f"Points: {float(player[config.COL_TOTAL_POINTS]):.1f} - "
@@ -72,7 +72,7 @@ if not players_df.empty:
 
     # Women's Standings
     st.header("Women's Standings")
-    active_women = active_players[active_players[config.COL_GENDER] == "W"]
+    active_women = active_players[active_players[config.COL_GENDER] == config.GENDER_FEMALE]
     if not active_women.empty:
         # Sort women players by selected column
         active_women = active_women.sort_values(by=sort_column, ascending=False)

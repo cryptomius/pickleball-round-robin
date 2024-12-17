@@ -33,18 +33,25 @@ active_players = players_df[players_df[config.COL_STATUS] == config.STATUS_PLAYE
 
 # Court Status Overview
 st.header("Court Status")
-courts_df = sheets_mgr.read_sheet(config.SHEET_COURTS)
 matches_df = sheets_mgr.read_sheet(config.SHEET_MATCHES)
 
-if not courts_df.empty:
-    court_cols = st.columns(len(courts_df))
-    for i, (court_col, (_, court)) in enumerate(zip(court_cols, courts_df.iterrows())):
-        with court_col:
-            st.subheader(f"{court[config.COL_COURT_NUMBER]}")
+# Get unique active courts from matches
+active_courts = matches_df[
+    matches_df[config.COL_MATCH_STATUS].isin([config.STATUS_SCHEDULED, config.STATUS_IN_PROGRESS])
+][config.COL_COURT_NUMBER].unique()
+
+# Initialize court count
+court_count = len(active_courts) if len(active_courts) > 0 else config.COURTS_COUNT
+
+if len(active_courts) > 0:
+    court_cols = st.columns(len(active_courts))
+    for i, court_number in enumerate(sorted(active_courts)):
+        with court_cols[i]:
+            st.subheader(f"Court {court_number}")
             
             # Get current match for this court
             court_matches = matches_df[
-                (matches_df[config.COL_COURT_NUMBER] == court[config.COL_COURT_NUMBER]) &
+                (matches_df[config.COL_COURT_NUMBER] == court_number) &
                 (matches_df[config.COL_MATCH_STATUS].isin([config.STATUS_SCHEDULED, config.STATUS_IN_PROGRESS]))
             ]
             
@@ -53,7 +60,7 @@ if not courts_df.empty:
                 current_match = court_matches.iloc[0]
             
             if current_match is not None:
-                #st.write("**Current Match:**")
+                st.write(f"**{current_match[config.COL_MATCH_TYPE]}**")
                 st.write(f"T1: {current_match[config.COL_TEAM1_PLAYER1]}, {current_match[config.COL_TEAM1_PLAYER2]}")
                 st.write(f"T2: {current_match[config.COL_TEAM2_PLAYER1]}, {current_match[config.COL_TEAM2_PLAYER2]}")
                 
@@ -86,13 +93,16 @@ if not courts_df.empty:
                         else:
                             # Update scores
                             if sheets_mgr.update_match_score(current_match[config.COL_MATCH_ID], team1_score, team2_score):
-                                st.success("Scores submitted successfully!")
-                                time.sleep(1)
-                                st.rerun()
+                                sheets_mgr.check_and_assign_courts()
+                                st.success("Score updated successfully!")
+                                st.experimental_rerun()
                             else:
                                 st.error("Failed to update match scores")
             else:
                 st.write("No active match")
+else:
+    # Default to 6 courts if no active matches
+    st.info("No active matches on courts")
 
 # Match Generation
 st.header("Generate Matches")
@@ -103,7 +113,6 @@ if len(active_players) < 4:
     st.error("Not enough active players to generate matches. Need at least 4 players.")
 else:
     # Get number of courts
-    court_count = len(courts_df) if not courts_df.empty else 0
     if court_count == 0:
         st.error("No courts available")
     else:
@@ -119,12 +128,27 @@ else:
                 available_slots = max_pending_matches - pending_match_count
                 
                 # Generate matches
-                new_matches = sheets_mgr.generate_next_matches(active_players, min(court_count, available_slots))
-                if new_matches:
-                    st.success(f"Generated {len(new_matches)} new matches!")
-                    st.rerun()
+                success = sheets_mgr.generate_next_matches(active_players, min(court_count, available_slots))
+                if success:
+                    sheets_mgr.check_and_assign_courts()
+                    st.success("Successfully generated new matches!")
+                    st.experimental_rerun()
                 else:
-                    st.error("Failed to generate matches")
+                    st.error("Failed to generate matches. Try again or check if all players have already played together.")
+                
+                # Get list of available courts (1-6 if no active matches)
+                active_courts = matches_df[
+                    matches_df[config.COL_MATCH_STATUS].isin([config.STATUS_SCHEDULED, config.STATUS_IN_PROGRESS])
+                ][config.COL_COURT_NUMBER].unique()
+                
+                available_courts = []
+                for i in range(1, 7):  # Courts 1-6
+                    if str(i) not in active_courts:
+                        available_courts.append(i)
+                
+                # Assign courts to new matches if courts are available
+                if available_courts:
+                    sheets_mgr.assign_pending_matches_to_courts(available_courts)
 
 # Display pending matches
 st.header("Pending Matches")
@@ -135,7 +159,7 @@ if not pending_matches.empty:
     for idx, match in pending_matches.iterrows():
         match_col, cancel_col = st.columns([4, 1])
         with match_col:
-            st.write(f"T1: {match[config.COL_TEAM1_PLAYER1]} & {match[config.COL_TEAM1_PLAYER2]} vs "
+            st.write(f"{match[config.COL_MATCH_TYPE]}: T1: {match[config.COL_TEAM1_PLAYER1]} & {match[config.COL_TEAM1_PLAYER2]} vs "
                     f"T2: {match[config.COL_TEAM2_PLAYER1]} & {match[config.COL_TEAM2_PLAYER2]}")
         with cancel_col:
             if st.button("Cancel Match", key=f"cancel_pending_{match[config.COL_MATCH_ID]}_{idx}"):

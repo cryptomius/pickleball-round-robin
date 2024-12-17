@@ -37,9 +37,11 @@ def display_qr_code():
     ### How the Tournament Works
     
     #### 🎯 Scoring System
-    - Win a match: 2 points
-    - Lose a match: 1 point
-    - Bonus points: Up to 1 extra point based on score difference (0.1 points per point difference)
+    - Win a match: 2 base points + up to 1 bonus point based on score difference
+    - Lose a match: 1 base point + bonus points based on how close the game was
+    - Example: In a 9-11 game
+      - Winners get 2.2 points (2 base + 0.2 bonus)
+      - Losers get 1.82 points (1 base + 0.82 performance bonus)
     
     #### 🤝 Player Matching
     Our smart matching system ensures:
@@ -50,7 +52,8 @@ def display_qr_code():
     
     #### 💫 Why This System?
     - Everyone earns points in every game - keeping it fun and engaging!
-    - Bonus points reward great play while keeping matches competitive
+    - Close games are rewarded - keeping matches competitive
+    - Good players shine even in losses - reflecting true skill levels
     - Mixed partnerships help you meet and play with everyone
     - Perfect for a social tournament where fun and fairness come first!
     """)
@@ -162,49 +165,17 @@ def main():
                 
                 st.write(f"{team_label}: {', '.join(filter(None, team_players))}")
                 st.write(f"{opponent_label}: {', '.join(filter(None, opponent_players))}")
+                st.write(f"Match Type: {match[config.COL_MATCH_TYPE]}")
                 
+                # Show match status
                 if match[config.COL_MATCH_STATUS] == config.STATUS_SCHEDULED:
-                    st.write("Enter Match Scores:")
-                    with st.form(f"score_entry_form_{match[config.COL_MATCH_ID]}"):
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            your_score = st.number_input(
-                                "Your Team's Score",
-                                min_value=0,
-                                max_value=15,
-                                value=0,
-                                key=f"your_score_{match[config.COL_MATCH_ID]}"
-                            )
-                        with col2:
-                            opponent_score = st.number_input(
-                                "Opponent's Score",
-                                min_value=0,
-                                max_value=15,
-                                value=0,
-                                key=f"opponent_score_{match[config.COL_MATCH_ID]}"
-                            )
-                        
-                        submitted = st.form_submit_button("Submit Scores")
-                        if submitted:
-                            try:
-                                if your_score == opponent_score:
-                                    st.error("Scores cannot be equal. There must be a winner.")
-                                else:
-                                    # Convert scores to team1/team2 format
-                                    team1_score = your_score if player_team == 1 else opponent_score
-                                    team2_score = opponent_score if player_team == 1 else your_score
-                                    
-                                    # Update scores using the sheets manager
-                                    if sheets_mgr.update_match_score(match[config.COL_MATCH_ID], team1_score, team2_score):
-                                        st.success("Scores submitted successfully!")
-                                        time.sleep(1)  # Give user time to see the success message
-                                        st.rerun()
-                                    else:
-                                        st.error("Failed to update match scores")
-                            except Exception as e:
-                                st.error(f"An error occurred: {str(e)}")
-                                traceback.print_exc()  # This will help debug by showing the full error
-        
+                    st.info("This match is scheduled. Please proceed to your assigned court.")
+                elif match[config.COL_MATCH_STATUS] == config.STATUS_IN_PROGRESS:
+                    st.info("This match is in progress. Good luck!")
+                
+                # Add a note about score entry
+                st.info("⚠️ Note: Match scores must be entered by the tournament coordinator.")
+            
             # Display upcoming matches
             upcoming_matches = matches_df[
                 ((matches_df[config.COL_TEAM1_PLAYER1] == selected_player) |
@@ -224,12 +195,12 @@ def main():
                         court_display = f"Court {str(court_number).replace('Court ', '')}"
                     
                     st.markdown(
-                        f"**{match[config.COL_MATCH_ID]}** ({court_display})  \n"
+                        f"**{match[config.COL_MATCH_ID]}** ({court_display}) - {match[config.COL_MATCH_TYPE]}  \n"
                         f"{match[config.COL_TEAM1_PLAYER1]} & {match[config.COL_TEAM1_PLAYER2]} vs "
                         f"{match[config.COL_TEAM2_PLAYER1]} & {match[config.COL_TEAM2_PLAYER2]}"
                     )
             else:
-                st.info("Check back in 10 minutes or when a court is free for your next scheduled match")
+                st.info("Check back when a court is free for your next scheduled match")
 
             # Display completed matches
             completed_matches = matches_df[
@@ -254,7 +225,7 @@ def main():
                     
                     # Format the match display
                     st.markdown(
-                        f"**{match[config.COL_MATCH_ID]}** ({court_display})  \n"
+                        f"**{match[config.COL_MATCH_ID]}** ({court_display}) - {match[config.COL_MATCH_TYPE]}  \n"
                         f"{match[config.COL_TEAM1_PLAYER1]} & {match[config.COL_TEAM1_PLAYER2]} vs "
                         f"{match[config.COL_TEAM2_PLAYER1]} & {match[config.COL_TEAM2_PLAYER2]}  \n"
                         f"Score: {team1_score} - {team2_score}"

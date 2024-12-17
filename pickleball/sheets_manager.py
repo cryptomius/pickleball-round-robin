@@ -66,19 +66,58 @@ class SheetsManager:
         return last_state is None or current_state != last_state
 
     def read_sheet(self, range_name):
-        """Read a sheet and return as DataFrame with proper column names"""
-        result = self.sheet.values().get(
-            spreadsheetId=config.SPREADSHEET_ID,
-            range=range_name
-        ).execute()
-        values = result.get('values', [])
-        
-        if not values:
-            # Return empty DataFrame with correct columns based on sheet name
-            if range_name == config.SHEET_COURTS:
-                return pd.DataFrame(columns=[config.COL_COURT_NUMBER, config.COL_STATUS, config.COL_MATCH_ID])
-            elif range_name == config.SHEET_PLAYERS:
-                return pd.DataFrame(columns=[
+        """Read a sheet and return as DataFrame with proper column names."""
+        try:
+            result = self.sheet.values().get(
+                spreadsheetId=config.SPREADSHEET_ID,
+                range=range_name
+            ).execute()
+            values = result.get('values', [])
+            
+            if not values:
+                # Return empty DataFrame with correct columns
+                if range_name == config.SHEET_PLAYERS:
+                    return pd.DataFrame(columns=[
+                        config.COL_NAME,
+                        config.COL_STATUS,
+                        config.COL_GENDER,
+                        config.COL_TOTAL_POINTS,
+                        config.COL_GAMES_PLAYED,
+                        config.COL_CHECK_IN_TIME,
+                        config.COL_LAST_MATCH_TIME,
+                        config.COL_AVG_POINTS
+                    ])
+                elif range_name == config.SHEET_MATCHES:
+                    return pd.DataFrame(columns=[
+                        config.COL_MATCH_ID,
+                        config.COL_COURT_NUMBER,
+                        config.COL_TEAM1_PLAYER1,
+                        config.COL_TEAM1_PLAYER2,
+                        config.COL_TEAM2_PLAYER1,
+                        config.COL_TEAM2_PLAYER2,
+                        config.COL_START_TIME,
+                        config.COL_END_TIME,
+                        config.COL_TEAM1_SCORE,
+                        config.COL_TEAM2_SCORE,
+                        config.COL_MATCH_STATUS,
+                        config.COL_MATCH_TYPE
+                    ])
+                elif range_name == config.SHEET_SCORES:
+                    return pd.DataFrame(columns=[config.COL_MATCH_ID, config.COL_NAME, config.COL_TOTAL_POINTS])
+                else:
+                    return pd.DataFrame()
+
+            # Get the header row and data
+            header = values[0]
+            data = values[1:]
+
+            # Create DataFrame with actual headers
+            df = pd.DataFrame(data)
+            
+            # Get expected headers for this sheet
+            expected_header = None
+            if range_name == config.SHEET_PLAYERS:
+                expected_header = [
                     config.COL_NAME,
                     config.COL_STATUS,
                     config.COL_GENDER,
@@ -87,9 +126,9 @@ class SheetsManager:
                     config.COL_CHECK_IN_TIME,
                     config.COL_LAST_MATCH_TIME,
                     config.COL_AVG_POINTS
-                ])
+                ]
             elif range_name == config.SHEET_MATCHES:
-                return pd.DataFrame(columns=[
+                expected_header = [
                     config.COL_MATCH_ID,
                     config.COL_COURT_NUMBER,
                     config.COL_TEAM1_PLAYER1,
@@ -100,79 +139,90 @@ class SheetsManager:
                     config.COL_END_TIME,
                     config.COL_TEAM1_SCORE,
                     config.COL_TEAM2_SCORE,
-                    config.COL_MATCH_STATUS
-                ])
+                    config.COL_MATCH_STATUS,
+                    config.COL_MATCH_TYPE
+                ]
             elif range_name == config.SHEET_SCORES:
-                return pd.DataFrame(columns=[config.COL_MATCH_ID, config.COL_NAME, config.COL_TOTAL_POINTS])
-            else:
-                return pd.DataFrame()
+                expected_header = [config.COL_MATCH_ID, config.COL_NAME, config.COL_TOTAL_POINTS]
 
-        # Get the header row and ensure it matches our expected columns
-        header = values[0]
-        expected_header = None
-        
-        if range_name == config.SHEET_PLAYERS:
-            expected_header = [
-                config.COL_NAME,
-                config.COL_STATUS,
-                config.COL_GENDER,
-                config.COL_TOTAL_POINTS,
-                config.COL_GAMES_PLAYED,
-                config.COL_CHECK_IN_TIME,
-                config.COL_LAST_MATCH_TIME,
-                config.COL_AVG_POINTS
-            ]
-        elif range_name == config.SHEET_MATCHES:
-            expected_header = [
-                config.COL_MATCH_ID,
-                config.COL_COURT_NUMBER,
-                config.COL_TEAM1_PLAYER1,
-                config.COL_TEAM1_PLAYER2,
-                config.COL_TEAM2_PLAYER1,
-                config.COL_TEAM2_PLAYER2,
-                config.COL_START_TIME,
-                config.COL_END_TIME,
-                config.COL_TEAM1_SCORE,
-                config.COL_TEAM2_SCORE,
-                config.COL_MATCH_STATUS
-            ]
-        elif range_name == config.SHEET_COURTS:
-            expected_header = [config.COL_COURT_NUMBER, config.COL_STATUS, config.COL_MATCH_ID]
-        elif range_name == config.SHEET_SCORES:
-            expected_header = [config.COL_MATCH_ID, config.COL_NAME, config.COL_TOTAL_POINTS]
-
-        if expected_header and header != expected_header:
-            header = expected_header
-
-        # Ensure all rows have the same number of columns as the header
-        data = []
-        for row in values[1:]:
-            # Pad row with empty strings if it's shorter than header
-            padded_row = row + [''] * (len(header) - len(row))
-            data.append(padded_row[:len(header)])  # Truncate if longer than header
+            if expected_header:
+                # Map actual column positions to expected columns
+                column_mapping = {}
+                for i, col in enumerate(header):
+                    if col in expected_header:
+                        column_mapping[i] = expected_header.index(col)
+                
+                # Reorder and pad columns as needed
+                reordered_data = []
+                for row in data:
+                    new_row = [''] * len(expected_header)
+                    for i, val in enumerate(row):
+                        if i in column_mapping:
+                            new_pos = column_mapping[i]
+                            new_row[new_pos] = val
+                    reordered_data.append(new_row)
+                
+                # Create new DataFrame with expected headers and reordered data
+                df = pd.DataFrame(reordered_data, columns=expected_header)
             
-        return pd.DataFrame(data, columns=header)
+            return df
+
+        except Exception as e:
+            st.write(f"Error reading sheet: {str(e)}")
+            return pd.DataFrame()
 
     def update_sheet(self, range_name, values):
         """Update a sheet with new values, clearing any existing data first."""
         try:
-            # Clear the entire range first
-            clear_result = self.sheet.values().clear(
+            # Get expected headers for this sheet
+            expected_header = None
+            if range_name == config.SHEET_PLAYERS:
+                expected_header = [
+                    config.COL_NAME,
+                    config.COL_STATUS,
+                    config.COL_GENDER,
+                    config.COL_TOTAL_POINTS,
+                    config.COL_GAMES_PLAYED,
+                    config.COL_CHECK_IN_TIME,
+                    config.COL_LAST_MATCH_TIME,
+                    config.COL_AVG_POINTS
+                ]
+            elif range_name == config.SHEET_MATCHES:
+                expected_header = [
+                    config.COL_MATCH_ID,
+                    config.COL_COURT_NUMBER,
+                    config.COL_TEAM1_PLAYER1,
+                    config.COL_TEAM1_PLAYER2,
+                    config.COL_TEAM2_PLAYER1,
+                    config.COL_TEAM2_PLAYER2,
+                    config.COL_START_TIME,
+                    config.COL_END_TIME,
+                    config.COL_TEAM1_SCORE,
+                    config.COL_TEAM2_SCORE,
+                    config.COL_MATCH_STATUS,
+                    config.COL_MATCH_TYPE
+                ]
+            elif range_name == config.SHEET_SCORES:
+                expected_header = [config.COL_MATCH_ID, config.COL_NAME, config.COL_TOTAL_POINTS]
+
+            # Clear the existing content except the header row
+            self.sheet.values().clear(
                 spreadsheetId=config.SPREADSHEET_ID,
-                range=range_name
+                range=f"{range_name}!A2:ZZ",  # Start from row 2 to preserve header
+                body={}
             ).execute()
 
-            # Then update with new values
-            body = {
-                'values': values
-            }
-            result = self.sheet.values().update(
+            # Update with new values, starting from row 2
+            values_to_write = values[1:]  # Skip the header row since we're preserving it
+            self.sheet.values().update(
                 spreadsheetId=config.SPREADSHEET_ID,
-                range=range_name,
+                range=f"{range_name}!A2",  # Start from row 2
                 valueInputOption='RAW',
-                body=body
+                body={'values': values_to_write}
             ).execute()
+
             return True
+
         except Exception as e:
             st.write(f"Error updating sheet: {str(e)}")
             return False
@@ -210,96 +260,70 @@ class SheetsManager:
     def update_match_score(self, match_id, team1_score, team2_score):
         """Update match score and handle all related updates."""
         try:
-            # 1. Update Matches sheet
+            # Get matches DataFrame
             matches_df = self.read_sheet(config.SHEET_MATCHES)
-            match_index = matches_df[matches_df[config.COL_MATCH_ID] == match_id].index[0]
-            match = matches_df.iloc[match_index]
-            current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
-            # Update match details
-            matches_df.at[match_index, config.COL_TEAM1_SCORE] = team1_score
-            matches_df.at[match_index, config.COL_TEAM2_SCORE] = team2_score
-            matches_df.at[match_index, config.COL_END_TIME] = current_time
-            matches_df.at[match_index, config.COL_MATCH_STATUS] = config.STATUS_COMPLETED
+            # Find the match
+            match_idx = matches_df[matches_df[config.COL_MATCH_ID] == match_id].index[0]
+            match = matches_df.iloc[match_idx]
             
-            # Get the court number before updating
-            completed_court = match[config.COL_COURT_NUMBER]
+            # Update match scores and status
+            matches_df.at[match_idx, config.COL_TEAM1_SCORE] = team1_score
+            matches_df.at[match_idx, config.COL_TEAM2_SCORE] = team2_score
+            matches_df.at[match_idx, config.COL_MATCH_STATUS] = config.STATUS_COMPLETED
             
-            # Find next pending match to assign to this court
-            pending_matches = matches_df[matches_df[config.COL_MATCH_STATUS] == config.STATUS_PENDING]
-            if not pending_matches.empty:
-                next_match_index = pending_matches.index[0]
-                matches_df.at[next_match_index, config.COL_COURT_NUMBER] = completed_court
-                matches_df.at[next_match_index, config.COL_MATCH_STATUS] = config.STATUS_SCHEDULED
+            # Calculate points
+            point_diff = abs(team1_score - team2_score)
+            team1_won = team1_score > team2_score
             
-            # Update matches sheet
-            self.update_sheet(config.SHEET_MATCHES, [matches_df.columns.tolist()] + matches_df.values.tolist())
+            # Base points
+            team1_base = 2 if team1_won else 1
+            team2_base = 2 if not team1_won else 1
             
-            # 2. Calculate points based on scores
-            score_diff = abs(team1_score - team2_score)
-            bonus_points = min(score_diff * config.BONUS_POINT_PER_DIFF, config.MAX_BONUS_POINTS)
-            
-            if team1_score > team2_score:
-                team1_points = config.POINTS_WIN + bonus_points  # Win points (2) + bonus
-                team2_points = config.POINTS_LOSS               # Loss points (1)
+            # Performance bonus
+            if team1_won:
+                team1_bonus = min(1.0, point_diff * 0.1)  # Winner's bonus (unchanged)
+                team2_bonus = (team2_score / team1_score)  # Loser's performance ratio (no 0.1 multiplier)
             else:
-                team1_points = config.POINTS_LOSS               # Loss points (1)
-                team2_points = config.POINTS_WIN + bonus_points  # Win points (2) + bonus
+                team2_bonus = min(1.0, point_diff * 0.1)  # Winner's bonus (unchanged)
+                team1_bonus = (team1_score / team2_score)  # Loser's performance ratio (no 0.1 multiplier)
             
-            # 3. Update Players sheet
+            # Total points for each team
+            team1_points = team1_base + team1_bonus
+            team2_points = team2_base + team2_bonus
+            
+            # Get players DataFrame
             players_df = self.read_sheet(config.SHEET_PLAYERS)
             
-            # Get player names
-            team1_players = [match[config.COL_TEAM1_PLAYER1], match[config.COL_TEAM1_PLAYER2]]
-            team2_players = [match[config.COL_TEAM2_PLAYER1], match[config.COL_TEAM2_PLAYER2]]
+            # Update points and games played for each player
+            for player in [match[config.COL_TEAM1_PLAYER1], match[config.COL_TEAM1_PLAYER2]]:
+                if pd.notna(player):
+                    player_idx = players_df[players_df[config.COL_NAME] == player].index[0]
+                    players_df.at[player_idx, config.COL_TOTAL_POINTS] += team1_points
+                    players_df.at[player_idx, config.COL_GAMES_PLAYED] += 1
+                    # Update average points
+                    total_points = players_df.at[player_idx, config.COL_TOTAL_POINTS]
+                    games_played = players_df.at[player_idx, config.COL_GAMES_PLAYED]
+                    players_df.at[player_idx, config.COL_AVG_POINTS] = total_points / games_played if games_played > 0 else 0
             
-            # Update each player's stats
-            for player, points in zip(team1_players + team2_players, 
-                                    [team1_points]*2 + [team2_points]*2):
-                player_idx = players_df[players_df[config.COL_NAME] == player].index[0]
-                
-                # Get current values, defaulting to 0 if empty
-                current_points = players_df.at[player_idx, config.COL_TOTAL_POINTS]
-                current_games = players_df.at[player_idx, config.COL_GAMES_PLAYED]
-                
-                if pd.isna(current_points) or current_points == '':
-                    current_points = 0
-                if pd.isna(current_games) or current_games == '':
-                    current_games = 0
-                
-                # Update player stats
-                new_points = float(current_points) + points
-                new_games = int(current_games) + 1
-                
-                players_df.at[player_idx, config.COL_TOTAL_POINTS] = new_points
-                players_df.at[player_idx, config.COL_GAMES_PLAYED] = new_games
-                players_df.at[player_idx, config.COL_LAST_MATCH_TIME] = current_time
-                players_df.at[player_idx, config.COL_AVG_POINTS] = round(new_points / new_games, 2)
+            for player in [match[config.COL_TEAM2_PLAYER1], match[config.COL_TEAM2_PLAYER2]]:
+                if pd.notna(player):
+                    player_idx = players_df[players_df[config.COL_NAME] == player].index[0]
+                    players_df.at[player_idx, config.COL_TOTAL_POINTS] += team2_points
+                    players_df.at[player_idx, config.COL_GAMES_PLAYED] += 1
+                    # Update average points
+                    total_points = players_df.at[player_idx, config.COL_TOTAL_POINTS]
+                    games_played = players_df.at[player_idx, config.COL_GAMES_PLAYED]
+                    players_df.at[player_idx, config.COL_AVG_POINTS] = total_points / games_played if games_played > 0 else 0
             
-            # Update players sheet
+            # Update sheets
+            self.update_sheet(config.SHEET_MATCHES, [matches_df.columns.tolist()] + matches_df.values.tolist())
             self.update_sheet(config.SHEET_PLAYERS, [players_df.columns.tolist()] + players_df.values.tolist())
             
-            # 4. Update Scores sheet with individual match points
-            scores_df = self.read_sheet(config.SHEET_SCORES)
-            
-            # Create new scores data
-            new_scores = []
-            for player, points in zip(team1_players + team2_players, 
-                                    [team1_points]*2 + [team2_points]*2):
-                new_scores.append([match_id, player, points])
-            
-            new_scores_df = pd.DataFrame(new_scores, columns=[config.COL_MATCH_ID, config.COL_NAME, config.COL_TOTAL_POINTS])
-            
-            # Ensure data types match before concatenation
-            for col in scores_df.columns:
-                new_scores_df[col] = new_scores_df[col].astype(scores_df[col].dtype)
-            
-            scores_df = pd.concat([scores_df, new_scores_df], ignore_index=True)
-            self.update_sheet(config.SHEET_SCORES, [scores_df.columns.tolist()] + scores_df.values.tolist())
-            
             return True
+            
         except Exception as e:
-            st.write(f"Error updating match score: {str(e)}")
+            st.error(f"Error updating match score: {str(e)}")
             return False
 
     def get_active_players(self):
@@ -317,13 +341,6 @@ class SheetsManager:
             (matches_df[config.COL_TEAM2_PLAYER1] == player_name) |
             (matches_df[config.COL_TEAM2_PLAYER2] == player_name)
         ]
-
-    def get_available_courts(self):
-        """Get list of available courts."""
-        courts_df = self.read_sheet(config.SHEET_COURTS)
-        if courts_df.empty:
-            return pd.DataFrame()
-        return courts_df
 
     def get_leaderboard(self):
         """Get the tournament leaderboard sorted by total points."""
@@ -378,36 +395,35 @@ class SheetsManager:
 
     def add_player(self, player_name, is_woman=False):
         """Add a new player to the Players sheet."""
+        # Read current players
+        players_df = self.read_sheet(config.SHEET_PLAYERS)
+        
+        # Check if player already exists
+        if player_name in players_df[config.COL_NAME].values:
+            return False
+        
+        # Create new player row
+        new_player = {
+            config.COL_NAME: player_name,
+            config.COL_STATUS: config.STATUS_PLAYER_ACTIVE,
+            config.COL_GENDER: config.GENDER_FEMALE if is_woman else config.GENDER_MALE,
+            config.COL_TOTAL_POINTS: 0,
+            config.COL_GAMES_PLAYED: 0,
+            config.COL_CHECK_IN_TIME: "",
+            config.COL_LAST_MATCH_TIME: "",
+            config.COL_AVG_POINTS: 0
+        }
+        
+        # Add new player to dataframe
+        players_df = pd.concat([players_df, pd.DataFrame([new_player])], ignore_index=True)
+        
+        # Update sheet
         try:
-            # Read existing players
-            players_df = self.read_sheet(config.SHEET_PLAYERS)
-            
-            # Check if player already exists
-            if not players_df.empty and player_name in players_df[config.COL_NAME].values:
-                return False, f"Player '{player_name}' already exists"
-            
-            # Create new player row
-            new_player = {
-                config.COL_NAME: player_name,
-                config.COL_STATUS: config.STATUS_ACTIVE,
-                config.COL_GENDER: "W" if is_woman else "",
-                config.COL_TOTAL_POINTS: 0,
-                config.COL_GAMES_PLAYED: 0,
-                config.COL_CHECK_IN_TIME: "",
-                config.COL_LAST_MATCH_TIME: "",
-                config.COL_AVG_POINTS: 0
-            }
-            
-            # Append new player
-            players_df = pd.concat([players_df, pd.DataFrame([new_player])], ignore_index=True)
-            
-            # Update sheet
             self.update_sheet(config.SHEET_PLAYERS, [players_df.columns.tolist()] + players_df.values.tolist())
-            
-            return True, f"Successfully added player '{player_name}'"
+            return True
         except Exception as e:
-            st.write(f"Error adding player: {str(e)}")
-            return False, f"Error adding player: {str(e)}"
+            st.error(f"Error adding player: {str(e)}")
+            return False
 
     def get_match_key(self, team1_players, team2_players):
         """Create a unique key for a match that is the same regardless of player order"""
@@ -435,7 +451,7 @@ class SheetsManager:
         match_key = self.get_match_key(team1_players, team2_players)
         current_date = pd.Timestamp.now()
         
-        # Get players DataFrame once for all active checks
+        # Get player information including gender
         players_df = self.read_sheet(config.SHEET_PLAYERS)
         
         # Sort matches by date to count matches since a particular match
@@ -482,202 +498,197 @@ class SheetsManager:
         return player_data[config.COL_STATUS].iloc[0] == config.STATUS_PLAYER_ACTIVE
 
     def generate_next_matches(self, active_players, court_count):
-        """Generate optimal matches based on player history"""
-        # Get existing matches to check who has played together
+        """Generate optimal matches based on player history."""
+        # Read existing matches
         matches_df = self.read_sheet(config.SHEET_MATCHES)
         
-        # Try to generate matches normally first
+        # Generate new matches
         new_matches = self._generate_matches(active_players, court_count, matches_df)
         
-        # If we couldn't generate any matches, all combinations might be used
-        if not new_matches and len(active_players) >= 4:
-            # Calculate total possible unique match combinations
-            n = len(active_players)
-            possible_combinations = (n * (n-1) * (n-2) * (n-3)) / 8  # Division by 8 because order doesn't matter within teams or between teams
+        if not new_matches:
+            return False
             
-            # Count actual unique match combinations in the sheet
-            unique_matches = set()
-            for _, match in matches_df.iterrows():
-                match_key = self.get_match_key(
-                    [match[config.COL_TEAM1_PLAYER1], match[config.COL_TEAM1_PLAYER2]],
-                    [match[config.COL_TEAM2_PLAYER1], match[config.COL_TEAM2_PLAYER2]]
-                )
-                unique_matches.add(match_key)
-            
-            # If we've used all possible combinations, clear the history and try again
-            if len(unique_matches) >= possible_combinations:
-                st.info("All possible match combinations have been used - starting a new round!")
-                new_matches = self._generate_matches(active_players, court_count, pd.DataFrame())  # Empty DataFrame = no history
-        
-        return new_matches
-
-    def _generate_matches(self, active_players, court_count, matches_df):
-        """Internal method to generate matches based on given history"""
-        # Create matrices to track playing with and against separately
-        partner_matrix = pd.DataFrame(0.0, index=active_players, columns=active_players, dtype=float)
-        opponent_matrix = pd.DataFrame(0.0, index=active_players, columns=active_players, dtype=float)
-        games_played = pd.Series(0, index=active_players)
-        
-        # Create a set to track unique match combinations
-        existing_match_combinations = set()
-        
-        # Weight recent matches more heavily using exponential decay
-        total_matches = len(matches_df)
-        for idx, match in matches_df.iterrows():
-            # More recent matches have higher weight (0.25 to 1.0)
-            recency_weight = 0.25 + 0.75 * (idx + 1) / total_matches
-            
-            # Only consider matches that are completed, scheduled, or in progress
-            if match[config.COL_MATCH_STATUS] in [config.STATUS_COMPLETED, config.STATUS_SCHEDULED, config.STATUS_IN_PROGRESS, config.STATUS_PENDING]:
-                team1 = sorted([match[config.COL_TEAM1_PLAYER1], match[config.COL_TEAM1_PLAYER2]])
-                team2 = sorted([match[config.COL_TEAM2_PLAYER1], match[config.COL_TEAM2_PLAYER2]])
-                
-                # Add this match combination to our set
-                match_key = tuple(sorted(team1 + team2))
-                existing_match_combinations.add(match_key)
-                
-                # Update games played count
-                for player in team1 + team2:
-                    if player in active_players:
-                        games_played[player] += 1
-                
-                # Update partner counts with higher weight for non-completed matches
-                status_weight = 2.0 if match[config.COL_MATCH_STATUS] != config.STATUS_COMPLETED else 1.0
-                for team in [team1, team2]:
-                    if team[0] in active_players and team[1] in active_players:
-                        weight = recency_weight * status_weight
-                        partner_matrix.loc[team[0], team[1]] += weight
-                        partner_matrix.loc[team[1], team[0]] += weight
-                
-                # Update opponent counts
-                for p1 in team1:
-                    for p2 in team2:
-                        if p1 in active_players and p2 in active_players:
-                            weight = recency_weight * status_weight
-                            opponent_matrix.loc[p1, p2] += weight
-                            opponent_matrix.loc[p2, p1] += weight
-        
-        # Get players who are currently in active or scheduled matches
-        busy_players = set()
-        for _, match in matches_df[
-            matches_df[config.COL_MATCH_STATUS].isin([config.STATUS_SCHEDULED, config.STATUS_IN_PROGRESS])
-        ].iterrows():
-            busy_players.update([
+        # Convert new matches to DataFrame rows
+        new_rows = []
+        for match in new_matches:
+            new_rows.append([
+                match[config.COL_MATCH_ID],
+                match[config.COL_COURT_NUMBER],
                 match[config.COL_TEAM1_PLAYER1],
                 match[config.COL_TEAM1_PLAYER2],
                 match[config.COL_TEAM2_PLAYER1],
-                match[config.COL_TEAM2_PLAYER2]
+                match[config.COL_TEAM2_PLAYER2],
+                match[config.COL_START_TIME],
+                match[config.COL_END_TIME],
+                match[config.COL_TEAM1_SCORE],
+                match[config.COL_TEAM2_SCORE],
+                match[config.COL_MATCH_STATUS],
+                match[config.COL_MATCH_TYPE]
             ])
+            
+        # Append new matches to existing ones
+        all_matches = pd.concat([matches_df, pd.DataFrame(new_rows, columns=matches_df.columns)], ignore_index=True)
         
-        # Get pending matches in order
-        pending_matches = matches_df[
-            matches_df[config.COL_MATCH_STATUS] == config.STATUS_PENDING
-        ].sort_values(by=config.COL_MATCH_ID)
+        # Update the sheet with all matches
+        self.update_sheet(config.SHEET_MATCHES, [all_matches.columns.tolist()] + all_matches.values.tolist())
         
-        # Get available players
-        available_players = [p for p in active_players if p not in busy_players]
-        
-        # Generate matches
+        return True
+
+    def _generate_matches(self, active_players, court_count, matches_df):
+        """Generate optimal matches based on player history"""
         matches = []
-        max_partner_count = 1  # Lower max partner count to 1 to prevent repeat partnerships
-        min_games = games_played.min()
-        max_games = games_played.max()
+        available_players = active_players.copy()
+        random.shuffle(available_players)  # Randomize initial order
         
-        # Hard cap: no player should play more than min_games + 1 until everyone has played min_games
-        max_allowed_games = min_games + (1 if all(games_played >= min_games) else 0)
+        # Get player information including gender
+        players_df = self.read_sheet(config.SHEET_PLAYERS)
+        player_genders = dict(zip(players_df[config.COL_NAME], players_df[config.COL_GENDER]))
         
-        while len(available_players) >= 4:
-            # Filter out players who have reached the hard cap
-            eligible_players = [p for p in available_players if games_played[p] < max_allowed_games]
-            if not eligible_players:
-                # If no eligible players, reset max_allowed_games
-                max_allowed_games += 1
-                eligible_players = available_players
+        # Count games played by each player
+        games_played = {player: 0 for player in active_players}
+        for _, match in matches_df.iterrows():
+            for player in [match[config.COL_TEAM1_PLAYER1], match[config.COL_TEAM1_PLAYER2],
+                         match[config.COL_TEAM2_PLAYER1], match[config.COL_TEAM2_PLAYER2]]:
+                if player in games_played:
+                    games_played[player] += 1
+        
+        # Create partnership history matrix
+        partner_matrix = pd.DataFrame(0, index=active_players, columns=active_players)
+        for _, match in matches_df.iterrows():
+            team1 = [match[config.COL_TEAM1_PLAYER1], match[config.COL_TEAM1_PLAYER2]]
+            team2 = [match[config.COL_TEAM2_PLAYER1], match[config.COL_TEAM2_PLAYER2]]
+            for team in [team1, team2]:
+                if team[0] in partner_matrix.index and team[1] in partner_matrix.columns:
+                    partner_matrix.loc[team[0], team[1]] += 1
+                    partner_matrix.loc[team[1], team[0]] += 1
+        
+        # Calculate maximum games any player should play
+        max_allowed_games = min(len(active_players) - 1, 
+                              max(games_played.values()) + 2)  # Allow up to 2 more games than current max
+        
+        # Calculate maximum times players should partner together
+        max_partner_count = 2  # Maximum times same partnership should occur
+        
+        def get_match_type(team1_players, team2_players):
+            """Determine the type of match based on player genders"""
+            team1_genders = [player_genders.get(p) for p in team1_players]
+            team2_genders = [player_genders.get(p) for p in team2_players]
             
-            # Among eligible players, find those who have played the least
-            min_eligible_games = min(games_played[p] for p in eligible_players)
-            least_played = [p for p in eligible_players if games_played[p] == min_eligible_games]
+            all_men = all(g == config.GENDER_MALE for g in team1_genders + team2_genders)
+            all_women = all(g == config.GENDER_FEMALE for g in team1_genders + team2_genders)
             
-            # Randomly select from the least played players
+            if all_men:
+                return config.MATCH_TYPE_MENS
+            elif all_women:
+                return config.MATCH_TYPE_WOMENS
+            else:
+                return config.MATCH_TYPE_MIXED
+        
+        def is_valid_team(player1, player2, match_type=None):
+            """Check if two players can form a valid team based on gender and match type"""
+            gender1 = player_genders.get(player1)
+            gender2 = player_genders.get(player2)
+            
+            if match_type == config.MATCH_TYPE_MENS:
+                return gender1 == gender2 == config.GENDER_MALE
+            elif match_type == config.MATCH_TYPE_WOMENS:
+                return gender1 == gender2 == config.GENDER_FEMALE
+            elif match_type == config.MATCH_TYPE_MIXED:
+                return gender1 != gender2
+            else:
+                # If no specific match type, any valid combination is fine
+                return True
+        
+        while len(available_players) >= 4 and len(matches) < court_count:
+            # Find players who have played the least number of games
+            min_games = min(games_played[p] for p in available_players)
+            least_played = [p for p in available_players if games_played[p] == min_games]
+            
+            # Randomly select first player
             player1 = random.choice(least_played)
             available_players.remove(player1)
+            player1_gender = player_genders.get(player1)
             
-            # Find potential partners (who haven't reached game limit)
-            potential_partners = [p for p in available_players 
-                                if partner_matrix.loc[player1, p] < max_partner_count
-                                and games_played[p] < max_allowed_games]
+            # Find potential partners based on match type
+            potential_partners = [
+                p for p in available_players 
+                if partner_matrix.loc[player1, p] < max_partner_count
+                and games_played[p] < max_allowed_games
+            ]
             
-            if not potential_partners:  # If no partners under constraints, relax game count but keep partner constraint
-                potential_partners = [p for p in available_players 
-                                   if partner_matrix.loc[player1, p] < max_partner_count]
+            if not potential_partners:  # If no partners under constraints, try different match type
+                potential_partners = [
+                    p for p in available_players 
+                    if games_played[p] < max_allowed_games
+                ]
             
             if not potential_partners:  # If still none, use all available but prioritize least partnered
                 potential_partners = available_players.copy()
-                # Sort by partnership count to minimize repeat partnerships
                 potential_partners.sort(key=lambda p: partner_matrix.loc[player1, p])
-                # Take only the first half of sorted partners to avoid worst pairings
                 potential_partners = potential_partners[:len(potential_partners)//2]
             
-            # Get the minimum games played among potential partners
-            min_partner_games = min(games_played[p] for p in potential_partners)
-            best_partners = [p for p in potential_partners 
-                            if games_played[p] == min_partner_games
-                            and partner_matrix.loc[player1, p] == min(partner_matrix.loc[player1, potential_partners])]
+            if not potential_partners:  # If still no partners, put player back and try again
+                available_players.append(player1)
+                continue
             
-            # Randomly select from best partners
-            partner = random.choice(best_partners)
+            # Select partner from potential partners
+            partner = random.choice(potential_partners)
             available_players.remove(partner)
             
-            # Find opponents (who haven't reached game limit)
-            potential_opponents = [p for p in available_players 
-                                 if games_played[p] < max_allowed_games]
-            if not potential_opponents:
-                potential_opponents = available_players.copy()
+            # Find opponents
+            potential_opponents = [
+                p for p in available_players 
+                if games_played[p] < max_allowed_games
+            ]
             
-            # Get minimum games among potential opponents
-            min_opponent_games = min(games_played[p] for p in potential_opponents)
-            best_opponents = [p for p in potential_opponents 
-                             if games_played[p] == min_opponent_games]
+            if not potential_opponents:  # If no valid opponents, put players back and try again
+                available_players.extend([player1, partner])
+                continue
             
-            # Randomly select first opponent from best options
-            opponent1 = random.choice(best_opponents)
+            # Select first opponent
+            opponent1 = random.choice(potential_opponents)
             available_players.remove(opponent1)
             
-            # Repeat for second opponent
-            potential_opponents = [p for p in available_players 
-                                 if games_played[p] < max_allowed_games]
-            if not potential_opponents:
-                potential_opponents = available_players.copy()
+            # Find second opponent
+            potential_opponents2 = [
+                p for p in available_players 
+                if games_played[p] < max_allowed_games
+            ]
             
-            min_opponent_games = min(games_played[p] for p in potential_opponents)
-            best_opponents = [p for p in potential_opponents 
-                             if games_played[p] == min_opponent_games]
+            if not potential_opponents2:  # If no valid second opponent, put all players back and try again
+                available_players.extend([player1, partner, opponent1])
+                continue
             
-            opponent2 = random.choice(best_opponents)
+            # Select second opponent
+            opponent2 = random.choice(potential_opponents2)
             available_players.remove(opponent2)
+            
+            # Determine actual match type based on selected team
+            actual_match_type = get_match_type([player1, partner], [opponent1, opponent2])
             
             # Check if this would be a duplicate match
             if self.is_duplicate_match(matches_df, [player1, partner], [opponent1, opponent2]):
                 # Put players back in available pool
                 available_players.extend([player1, partner, opponent1, opponent2])
                 continue
-
+            
             # Get next match ID
             match_id_pattern = r'M(\d+)'
             existing_match_ids = matches_df[config.COL_MATCH_ID].str.extract(match_id_pattern, expand=False).astype(float)
             next_match_id = int(existing_match_ids.max() + 1) if not existing_match_ids.empty else 1
             
-            # Also check IDs in current batch of matches
+            # Check IDs in current batch
             if matches:
                 batch_ids = pd.Series([m[config.COL_MATCH_ID] for m in matches]).str.extract(match_id_pattern, expand=False).astype(float)
                 if not batch_ids.empty:
                     next_match_id = max(next_match_id, int(batch_ids.max() + 1))
-
-            # Ensure this ID doesn't exist in any matches (including cancelled ones)
+            
+            # Ensure unique match ID
             while f"M{next_match_id}" in matches_df[config.COL_MATCH_ID].values or \
                   any(m[config.COL_MATCH_ID] == f"M{next_match_id}" for m in matches):
                 next_match_id += 1
-
+            
+            # Create the match
             match = {
                 config.COL_MATCH_ID: f"M{next_match_id}",
                 config.COL_COURT_NUMBER: "",  # Will be assigned if courts available
@@ -686,87 +697,20 @@ class SheetsManager:
                 config.COL_TEAM2_PLAYER1: opponent1,
                 config.COL_TEAM2_PLAYER2: opponent2,
                 config.COL_MATCH_STATUS: config.STATUS_PENDING,
-                config.COL_START_TIME: "",
+                config.COL_START_TIME: "",  # Will be set when scheduled
                 config.COL_END_TIME: "",
                 config.COL_TEAM1_SCORE: "",
-                config.COL_TEAM2_SCORE: ""
+                config.COL_TEAM2_SCORE: "",
+                config.COL_MATCH_TYPE: actual_match_type
             }
             
-            # Add the match to matches_df to check for future duplicates
-            matches_df = pd.concat([matches_df, pd.DataFrame([match])], ignore_index=True)
             matches.append(match)
             
-            # Update games played for next iteration
+            # Update games played count for next iteration
             for player in [player1, partner, opponent1, opponent2]:
                 games_played[player] += 1
-            
-            # Update minimum games and max allowed games
-            min_games = games_played[available_players].min() if available_players else 0
-            max_allowed_games = min_games + (1 if all(games_played >= min_games) else 0)
-            
-            if len(matches) >= court_count * 2:  # Generate up to 2x the number of courts
-                break
-
-        if matches:
-            # Get pending matches in order
-            pending_matches = matches_df[
-                matches_df[config.COL_MATCH_STATUS] == config.STATUS_PENDING
-            ].sort_values(by=config.COL_MATCH_ID)
-            
-            # Filter out any new matches that would create duplicates with pending matches
-            filtered_matches = []
-            pending_combinations = set()
-            
-            # First, add all pending match combinations to our set
-            for match in pending_matches.to_dict('records'):
-                team1 = sorted([match[config.COL_TEAM1_PLAYER1], match[config.COL_TEAM1_PLAYER2]])
-                team2 = sorted([match[config.COL_TEAM2_PLAYER1], match[config.COL_TEAM2_PLAYER2]])
-                match_key = tuple(sorted(team1 + team2))
-                pending_combinations.add(match_key)
-            
-            # Then filter new matches
-            for match in matches:
-                team1 = sorted([match[config.COL_TEAM1_PLAYER1], match[config.COL_TEAM1_PLAYER2]])
-                team2 = sorted([match[config.COL_TEAM2_PLAYER1], match[config.COL_TEAM2_PLAYER2]])
-                match_key = tuple(sorted(team1 + team2))
-                
-                if match_key not in pending_combinations:
-                    filtered_matches.append(match)
-                    pending_combinations.add(match_key)
-            
-            # Combine pending matches with filtered new matches
-            all_matches = list(pending_matches.to_dict('records')) + filtered_matches
-            
-            # Check for available courts
-            matches_df = self.read_sheet(config.SHEET_MATCHES)
-            courts_df = self.read_sheet(config.SHEET_COURTS)
-            
-            # Get courts that have active or scheduled matches
-            busy_courts = matches_df[
-                matches_df[config.COL_MATCH_STATUS].isin([config.STATUS_SCHEDULED, config.STATUS_IN_PROGRESS])
-            ][config.COL_COURT_NUMBER].unique()
-            
-            # Get available courts (including empty strings and NaN)
-            available_courts = courts_df[
-                ~courts_df[config.COL_COURT_NUMBER].isin(busy_courts)
-            ][config.COL_COURT_NUMBER].tolist()
-            
-            # Assign available courts to matches in order
-            for i, match in enumerate(all_matches):
-                if i < len(available_courts):
-                    match[config.COL_COURT_NUMBER] = available_courts[i]
-                    match[config.COL_MATCH_STATUS] = config.STATUS_SCHEDULED
-            
-            # Add matches to sheet
-            matches_df = pd.concat([
-                matches_df[~matches_df[config.COL_MATCH_ID].isin([m[config.COL_MATCH_ID] for m in all_matches])],
-                pd.DataFrame(all_matches)
-            ], ignore_index=True)
-            
-            self.update_sheet(config.SHEET_MATCHES, [matches_df.columns.tolist()] + matches_df.values.tolist())
-            return matches
         
-        return None
+        return matches
 
     def cancel_match(self, match_id):
         """Cancel a match and assign next pending match if court is available."""
@@ -778,61 +722,56 @@ class SheetsManager:
             match_idx = matches_df[matches_df[config.COL_MATCH_ID] == match_id].index
             if len(match_idx) == 0:
                 return False, "Match not found"
-                
-            # Get the court number if it was assigned
-            cancelled_court = matches_df.loc[match_idx[0], config.COL_COURT_NUMBER]
             
             # Remove the match
             matches_df = matches_df.drop(match_idx)
             
-            # If court was assigned, try to assign next pending match
-            if cancelled_court:
-                # Get next pending match
-                pending_matches = matches_df[matches_df[config.COL_MATCH_STATUS] == config.STATUS_PENDING]
-                if not pending_matches.empty:
-                    next_match = pending_matches.iloc[0]
-                    next_match_idx = pending_matches.index[0]
-                    
-                    # Assign court to next match
-                    matches_df.loc[next_match_idx, config.COL_COURT_NUMBER] = cancelled_court
-                    matches_df.loc[next_match_idx, config.COL_MATCH_STATUS] = config.STATUS_SCHEDULED
+            # Update the sheet
+            success = self.update_sheet(config.SHEET_MATCHES, [matches_df.columns.tolist()] + matches_df.values.tolist())
             
-            # Update sheet
-            self.update_sheet(config.SHEET_MATCHES, [matches_df.columns.tolist()] + matches_df.values.tolist())
-            return True, "Match cancelled successfully"
-            
+            if success:
+                # Check and assign courts after cancellation
+                self.check_and_assign_courts()
+                return True, "Match cancelled successfully"
+            else:
+                return False, "Failed to update matches sheet"
+                
         except Exception as e:
-            st.write(f"Error cancelling match: {str(e)}")
             return False, f"Error cancelling match: {str(e)}"
 
     def handle_player_inactivation(self, player_name):
         """Handle matches when a player is marked as inactive."""
-        matches_df = self.read_sheet(config.SHEET_MATCHES)
-        
-        # Find matches involving the player
-        player_matches = matches_df[
-            ((matches_df[config.COL_TEAM1_PLAYER1] == player_name) |
-             (matches_df[config.COL_TEAM1_PLAYER2] == player_name) |
-             (matches_df[config.COL_TEAM2_PLAYER1] == player_name) |
-             (matches_df[config.COL_TEAM2_PLAYER2] == player_name)) &
-            (matches_df[config.COL_MATCH_STATUS].isin([config.STATUS_SCHEDULED, config.STATUS_PENDING]))
-        ]
-        
-        if player_matches.empty:
-            return None, None
-        
-        # Separate current (on court) and scheduled (pending) matches
-        current_matches = player_matches[
-            (player_matches[config.COL_MATCH_STATUS] == config.STATUS_SCHEDULED) &
-            (player_matches[config.COL_COURT_NUMBER] != "")
-        ]
-        scheduled_matches = player_matches[
-            (player_matches[config.COL_MATCH_STATUS] == config.STATUS_PENDING) |
-            ((player_matches[config.COL_MATCH_STATUS] == config.STATUS_SCHEDULED) &
-             (player_matches[config.COL_COURT_NUMBER] == ""))
-        ]
-        
-        return current_matches, scheduled_matches
+        try:
+            # Get current matches
+            matches_df = self.read_sheet(config.SHEET_MATCHES)
+            
+            # Find matches involving this player that are scheduled or in progress
+            player_matches = matches_df[
+                (matches_df[config.COL_MATCH_STATUS].isin([config.STATUS_SCHEDULED, config.STATUS_IN_PROGRESS])) &
+                ((matches_df[config.COL_TEAM1_PLAYER1] == player_name) |
+                 (matches_df[config.COL_TEAM1_PLAYER2] == player_name) |
+                 (matches_df[config.COL_TEAM2_PLAYER1] == player_name) |
+                 (matches_df[config.COL_TEAM2_PLAYER2] == player_name))
+            ]
+            
+            if not player_matches.empty:
+                # Get match IDs to remove
+                match_ids = player_matches[config.COL_MATCH_ID].tolist()
+                
+                # Remove the matches
+                success = self.remove_matches(match_ids)
+                
+                if success:
+                    # Check and assign courts after removing matches
+                    self.check_and_assign_courts()
+                    return True, f"Removed {len(match_ids)} matches for inactive player"
+                else:
+                    return False, "Failed to remove matches"
+            
+            return True, "No active matches found for player"
+            
+        except Exception as e:
+            return False, f"Error handling player inactivation: {str(e)}"
 
     def assign_pending_matches_to_courts(self, freed_courts):
         """Assign pending matches to freed up courts."""
@@ -870,6 +809,7 @@ class SheetsManager:
                 match[config.COL_TEAM2_PLAYER1],
                 match[config.COL_TEAM2_PLAYER2]
             }
+            # Skip if any players in the match are not in current teams and not active
             if not match_players & busy_players:  # No intersection with busy players
                 valid_pending_matches.append(match)
         
@@ -969,3 +909,45 @@ class SheetsManager:
         active_players = players_df[players_df[config.COL_STATUS] == config.STATUS_ACTIVE]
         if len(active_players) >= 4:  # Need at least 4 players for a match
             self.generate_next_matches(active_players[config.COL_NAME].tolist(), num_matches)
+
+    def migrate_gender_values(self):
+        """Migrate old gender values (W) to new values (M/F)"""
+        try:
+            # Read current players
+            players_df = self.read_sheet(config.SHEET_PLAYERS)
+            
+            # Update gender values
+            players_df[config.COL_GENDER] = players_df[config.COL_GENDER].apply(
+                lambda x: config.GENDER_FEMALE if x == "W" else (
+                    config.GENDER_MALE if pd.isna(x) or x == "" else x
+                )
+            )
+            
+            # Update sheet
+            self.update_sheet(config.SHEET_PLAYERS, [players_df.columns.tolist()] + players_df.values.tolist())
+            return True
+        except Exception as e:
+            st.error(f"Error migrating gender values: {str(e)}")
+            return False
+
+    def check_and_assign_courts(self):
+        """Check for available courts and assign them to pending matches."""
+        # Get current matches
+        matches_df = self.read_sheet(config.SHEET_MATCHES)
+        
+        # Find active courts (those with scheduled or in-progress matches)
+        active_courts = matches_df[
+            matches_df[config.COL_MATCH_STATUS].isin([config.STATUS_SCHEDULED, config.STATUS_IN_PROGRESS])
+        ][config.COL_COURT_NUMBER].unique()
+        
+        # Get list of available courts (1-6)
+        available_courts = []
+        for i in range(1, 7):  # Courts 1-6
+            if str(i) not in active_courts:
+                available_courts.append(i)
+        
+        # If there are available courts, assign them to pending matches
+        if available_courts:
+            self.assign_pending_matches_to_courts(available_courts)
+            return True
+        return False
