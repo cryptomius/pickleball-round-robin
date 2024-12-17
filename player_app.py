@@ -188,7 +188,14 @@ def main():
             
             st.write("### Up-coming Matches")
             if not upcoming_matches.empty:
+                # Get all pending matches to determine queue position
+                all_pending_matches = matches_df[matches_df[config.COL_MATCH_STATUS] == config.STATUS_PENDING]
+                all_pending_matches = all_pending_matches.reset_index()  # Reset index to get position
+                
                 for _, match in upcoming_matches.iterrows():
+                    # Find position in pending queue
+                    match_position = all_pending_matches[all_pending_matches[config.COL_MATCH_ID] == match[config.COL_MATCH_ID]].index[0] + 1
+                    
                     court_number = match[config.COL_COURT_NUMBER]
                     if pd.isna(court_number) or court_number == "":
                         court_display = "Court TBC"
@@ -196,7 +203,7 @@ def main():
                         court_display = f"Court {str(court_number).replace('Court ', '')}"
                     
                     st.markdown(
-                        f"**{match[config.COL_MATCH_ID]}** ({court_display}) - {match[config.COL_MATCH_TYPE]}  \n"
+                        f"**Queue Position: {match_position}** ({court_display}) - {match[config.COL_MATCH_TYPE]}  \n"
                         f"{match[config.COL_TEAM1_PLAYER1]} & {match[config.COL_TEAM1_PLAYER2]} vs "
                         f"{match[config.COL_TEAM2_PLAYER1]} & {match[config.COL_TEAM2_PLAYER2]}"
                     )
