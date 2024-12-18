@@ -38,7 +38,7 @@ st.markdown("""
         padding: 0.5rem;
         display: flex;
         align-items: center;
-        background-color: #f2f2f2;
+        background-color: #e7ffe8;
     }
     .matches-row.conflict {
         background-color: #ffe8e8;
