@@ -9,7 +9,7 @@ sheets_mgr = SheetsManager()
 
 st.title("Match Management")
 
-# Add custom CSS and hide sidebar
+# Add custom CSS
 st.markdown("""
     <style>
     .block-container {
@@ -38,9 +38,10 @@ st.markdown("""
         padding: 0.5rem;
         display: flex;
         align-items: center;
-    }
-    .matches-row {
         background-color: #f2f2f2;
+    }
+    .matches-row.conflict {
+        background-color: #ffe8e8;
     }
     .order-num {
         flex: 0.5;
@@ -61,8 +62,11 @@ st.markdown("""
     div:has(.matches-row) + div {
         margin-top: -40px;
     }
+    a[href="https://streamlit.io/cloud"],
+    #root header:first-child {
+        display: none;
+    }
     </style>
-    
 """, unsafe_allow_html=True)
 
 
@@ -155,6 +159,11 @@ st.write("**Awaiting court assignment**")
 
 pending_matches = matches_df[matches_df[config.COL_MATCH_STATUS] == config.STATUS_PENDING].head(10)
 if not pending_matches.empty:
+    # Get all currently scheduled matches to check for conflicts
+    scheduled_matches = matches_df[
+        matches_df[config.COL_MATCH_STATUS].isin([config.STATUS_SCHEDULED, config.STATUS_IN_PROGRESS])
+    ]
+    
     # Create header
     st.markdown(
         '<div class="matches-header">'
@@ -169,11 +178,37 @@ if not pending_matches.empty:
     
     # Display matches
     for order_num, (idx, match) in enumerate(pending_matches.iterrows(), 1):
-        team1 = f"{match[config.COL_TEAM1_PLAYER1]} & {match[config.COL_TEAM1_PLAYER2]}"
-        team2 = f"{match[config.COL_TEAM2_PLAYER1]} & {match[config.COL_TEAM2_PLAYER2]}"
+        # Check if any players in this match are in scheduled matches
+        match_players = [
+            match[config.COL_TEAM1_PLAYER1], match[config.COL_TEAM1_PLAYER2],
+            match[config.COL_TEAM2_PLAYER1], match[config.COL_TEAM2_PLAYER2]
+        ]
+        player_conflicts = set()
+        has_conflict = False
+        if not scheduled_matches.empty:
+            for player in match_players:
+                if player in scheduled_matches[config.COL_TEAM1_PLAYER1].values or \
+                   player in scheduled_matches[config.COL_TEAM1_PLAYER2].values or \
+                   player in scheduled_matches[config.COL_TEAM2_PLAYER1].values or \
+                   player in scheduled_matches[config.COL_TEAM2_PLAYER2].values:
+                    player_conflicts.add(player)
+                    has_conflict = True
         
+        # Format player names with bold for conflicts
+        def format_player_name(name):
+            return f"<strong>{name}</strong>" if name in player_conflicts else name
+        
+        team1_p1 = format_player_name(match[config.COL_TEAM1_PLAYER1])
+        team1_p2 = format_player_name(match[config.COL_TEAM1_PLAYER2])
+        team2_p1 = format_player_name(match[config.COL_TEAM2_PLAYER1])
+        team2_p2 = format_player_name(match[config.COL_TEAM2_PLAYER2])
+        
+        team1 = f"{team1_p1} & {team1_p2}"
+        team2 = f"{team2_p1} & {team2_p2}"
+        
+        conflict_class = " conflict" if has_conflict else ""
         st.markdown(
-            f'<div class="matches-row">'
+            f'<div class="matches-row{conflict_class}">'
             f'<div class="order-num">{order_num}</div>'
             f'<div class="match-type">{match[config.COL_MATCH_TYPE]}</div>'
             f'<div class="team1">{team1}</div>'
