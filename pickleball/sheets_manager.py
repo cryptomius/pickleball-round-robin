@@ -8,6 +8,7 @@ from . import config
 import random
 import os
 import json
+import time
 
 class SheetsManager:
     def __init__(self):
@@ -171,77 +172,154 @@ class SheetsManager:
             st.write(f"Error reading sheet: {str(e)}")
             return pd.DataFrame()
 
-    def update_sheet(self, range_name, values):
-        """Update a sheet with new values, clearing any existing data first."""
+    def _verify_sheet_update(self, range_name, expected_values, max_retries=3):
+        """Verify that the sheet has been updated correctly with the expected values."""
         try:
-            # Get the expected header based on the sheet
-            if range_name == config.SHEET_PLAYERS:
-                expected_header = [
-                    config.COL_NAME,
-                    config.COL_STATUS,
-                    config.COL_GENDER,
-                    config.COL_TOTAL_POINTS,
-                    config.COL_GAMES_PLAYED,
-                    config.COL_CHECK_IN_TIME,
-                    config.COL_LAST_MATCH_TIME,
-                    config.COL_AVG_POINTS
-                ]
-            elif range_name == config.SHEET_MATCHES:
-                expected_header = [
-                    config.COL_MATCH_ID,
-                    config.COL_COURT_NUMBER,
-                    config.COL_TEAM1_PLAYER1,
-                    config.COL_TEAM1_PLAYER2,
-                    config.COL_TEAM2_PLAYER1,
-                    config.COL_TEAM2_PLAYER2,
-                    config.COL_START_TIME,
-                    config.COL_END_TIME,
-                    config.COL_TEAM1_SCORE,
-                    config.COL_TEAM2_SCORE,
-                    config.COL_MATCH_STATUS,
-                    config.COL_MATCH_TYPE
-                ]
-            elif range_name == config.SHEET_SCORES:
-                expected_header = [config.COL_MATCH_ID, config.COL_NAME, config.COL_TOTAL_POINTS]
-
-            # First, read the current header
-            result = self.sheet.values().get(
-                spreadsheetId=config.SPREADSHEET_ID,
-                range=f"{range_name}!A1:Z1"
-            ).execute()
-            current_header = result.get('values', [[]])[0] if result.get('values') else []
-
-            # If header is missing or different, update it
-            if not current_header or current_header != expected_header:
-                self.sheet.values().update(
+            # Calculate the range based on the data size
+            if len(expected_values) > 1:  # If we have data beyond header
+                values_to_verify = expected_values[1:]  # Skip header
+                num_rows = len(values_to_verify)
+                num_cols = len(values_to_verify[0]) if values_to_verify else len(expected_values[0])
+                end_col = chr(ord('A') + num_cols - 1)
+                
+                # Read the current values including header
+                result = self.sheet.values().get(
                     spreadsheetId=config.SPREADSHEET_ID,
-                    range=f"{range_name}!A1",
-                    valueInputOption='RAW',
-                    body={'values': [expected_header]}
+                    range=f"{range_name}!A1:{end_col}{num_rows + 1}"  # +1 for header row
                 ).execute()
-
-            # Clear the existing content except the header row
-            self.sheet.values().clear(
-                spreadsheetId=config.SPREADSHEET_ID,
-                range=f"{range_name}!A2:ZZ",  # Start from row 2 to preserve header
-                body={}
-            ).execute()
-
-            # Update with new values, starting from row 2
-            if len(values) > 1:  # Only update if there are values besides the header
-                values_to_write = values[1:]  # Skip the header row since we're preserving it
-                self.sheet.values().update(
-                    spreadsheetId=config.SPREADSHEET_ID,
-                    range=f"{range_name}!A2",  # Start from row 2
-                    valueInputOption='RAW',
-                    body={'values': values_to_write}
-                ).execute()
-
-            return True
-
+                
+                current_values = result.get('values', [])
+                
+                # Quick length check
+                if len(current_values) != len(expected_values):
+                    return False
+                
+                # Compare each row's contents, ignoring trailing empty cells
+                for curr_row, exp_row in zip(current_values, expected_values):
+                    # Trim any trailing empty cells from both rows
+                    while curr_row and curr_row[-1] == '':
+                        curr_row.pop()
+                    while exp_row and exp_row[-1] == '':
+                        exp_row.pop()
+                        
+                    if curr_row != exp_row:
+                        return False
+                
+                return True
+            
+            return True  # If no data to verify
+            
         except Exception as e:
-            st.write(f"Error updating sheet: {str(e)}")
+            st.write(f"Error verifying sheet update: {str(e)}")
             return False
+
+    def update_sheet(self, range_name, values):
+        """Update a sheet with new values. Updates in-place without clearing first."""
+        if not values:
+            st.write(f"Warning: Attempted to update {range_name} with empty values")
+            return False
+
+        max_retries = 3
+        # Progressive retry delays: 1s, 3s, 6s
+        retry_delays = [1, 3, 6]
+
+        for attempt in range(max_retries):
+            try:
+                # Get the expected header based on the sheet
+                expected_header = None
+                if range_name == config.SHEET_PLAYERS:
+                    expected_header = [
+                        config.COL_NAME,
+                        config.COL_STATUS,
+                        config.COL_GENDER,
+                        config.COL_TOTAL_POINTS,
+                        config.COL_GAMES_PLAYED,
+                        config.COL_CHECK_IN_TIME,
+                        config.COL_LAST_MATCH_TIME,
+                        config.COL_AVG_POINTS
+                    ]
+                elif range_name == config.SHEET_MATCHES:
+                    expected_header = [
+                        config.COL_MATCH_ID,
+                        config.COL_COURT_NUMBER,
+                        config.COL_TEAM1_PLAYER1,
+                        config.COL_TEAM1_PLAYER2,
+                        config.COL_TEAM2_PLAYER1,
+                        config.COL_TEAM2_PLAYER2,
+                        config.COL_START_TIME,
+                        config.COL_END_TIME,
+                        config.COL_TEAM1_SCORE,
+                        config.COL_TEAM2_SCORE,
+                        config.COL_MATCH_STATUS,
+                        config.COL_MATCH_TYPE
+                    ]
+                elif range_name == config.SHEET_SCORES:
+                    expected_header = [config.COL_MATCH_ID, config.COL_NAME, config.COL_TOTAL_POINTS]
+
+                # Prepare the update data
+                if len(values) > 1:
+                    values_to_write = values[1:]  # Skip the header row
+                    num_rows = len(values_to_write)
+                    num_cols = len(values_to_write[0]) if values_to_write else len(expected_header)
+                    end_col = chr(ord('A') + num_cols - 1)
+                    
+                    # Create batch update request
+                    batch_update = {
+                        'valueInputOption': 'RAW',
+                        'data': [
+                            {
+                                'range': f"{range_name}!A1",
+                                'values': [expected_header]
+                            },
+                            {
+                                'range': f"{range_name}!A2:{end_col}{num_rows + 1}",
+                                'values': values_to_write
+                            }
+                        ]
+                    }
+                    
+                    # Execute batch update
+                    self.sheet.values().batchUpdate(
+                        spreadsheetId=config.SPREADSHEET_ID,
+                        body=batch_update
+                    ).execute()
+                    
+                    # Only verify on the final attempt or if previous attempt failed
+                    if attempt == max_retries - 1 or attempt > 0:
+                        if not self._verify_sheet_update(range_name, values):
+                            if attempt < max_retries - 1:
+                                time.sleep(retry_delays[attempt])
+                                continue
+                            st.error(f"Failed to verify update of {range_name} after {max_retries} attempts")
+                            return False
+
+                    # Get the total number of rows in the sheet
+                    result = self.sheet.values().get(
+                        spreadsheetId=config.SPREADSHEET_ID,
+                        range=f"{range_name}"
+                    ).execute()
+                    all_values = result.get('values', [])
+                    total_rows = len(all_values)
+                    
+                    # If there are extra rows beyond our data, clear them
+                    if total_rows > num_rows + 1:  # +1 for header
+                        self.sheet.values().clear(
+                            spreadsheetId=config.SPREADSHEET_ID,
+                            range=f"{range_name}!A{num_rows + 2}:{end_col}{total_rows}",
+                            body={}
+                        ).execute()
+                
+                return True
+
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delays[attempt])
+                    st.write(f"Retry {attempt + 1}/{max_retries} after error: {str(e)}")
+                    continue
+                st.error(f"Error updating sheet after {max_retries} attempts: {str(e)}")
+                return False
+
+        return False
 
     def update_match_status(self, match_id, new_status):
         try:
