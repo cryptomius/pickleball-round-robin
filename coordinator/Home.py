@@ -10,15 +10,6 @@ st.set_page_config(
     layout="wide",
 )
 
-sheets_mgr = SheetsManager()
-
-# Migrate gender values if needed
-if 'gender_migrated' not in st.session_state:
-    st.session_state.gender_migrated = False
-
-if not st.session_state.gender_migrated:
-    if sheets_mgr.migrate_gender_values():
-        st.session_state.gender_migrated = True
 
 # Add custom CSS
 st.markdown("""

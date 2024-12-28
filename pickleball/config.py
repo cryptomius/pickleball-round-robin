@@ -1,12 +1,6 @@
 import os
-from datetime import datetime, time
 
 # Tournament Settings
-TOURNAMENT_DATE = datetime(2025, 1, 3)
-START_TIME = time(10, 0)
-LUNCH_START = time(12, 0)
-LUNCH_DURATION = 60  # minutes
-MAX_DURATION = 360  # minutes (6 hours)
 COURTS_COUNT = 6
 
 # Scoring System
@@ -14,6 +8,7 @@ POINTS_WIN = 2
 POINTS_LOSS = 1
 BONUS_POINT_PER_DIFF = 0.1
 MAX_BONUS_POINTS = 1.0
+MIN_GAMES_FOR_RANKING = 3  # Minimum number of games required to be ranked in standings
 
 # Google Sheets Configuration
 SPREADSHEET_ID = "1_ga5oUPky7iEBf88KiBjMoCAr4-5eY-DZPuLRRCL86Y"  # To be filled with your Google Sheet ID
@@ -72,3 +67,6 @@ STATUS_SCHEDULED = "Scheduled"
 STATUS_IN_PROGRESS = "In Progress"
 STATUS_COMPLETED = "Completed"
 STATUS_CANCELLED = "Cancelled"
+
+# Scores Sheet
+COL_POINTS = "Points"
