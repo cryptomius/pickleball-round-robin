@@ -75,6 +75,33 @@ st.markdown("""
 players_df = sheets_mgr.read_sheet(config.SHEET_PLAYERS)
 active_players = players_df[players_df[config.COL_STATUS] == config.STATUS_PLAYER_ACTIVE]
 
+# Get all blocking players from pending matches
+blocking_players = set()
+pending_matches = sheets_mgr.read_sheet(config.SHEET_MATCHES)[sheets_mgr.read_sheet(config.SHEET_MATCHES)[config.COL_MATCH_STATUS] == config.STATUS_PENDING].head(10)
+scheduled_matches = sheets_mgr.read_sheet(config.SHEET_MATCHES)[
+    sheets_mgr.read_sheet(config.SHEET_MATCHES)[config.COL_MATCH_STATUS].isin([config.STATUS_SCHEDULED, config.STATUS_IN_PROGRESS])
+]
+
+if not pending_matches.empty and not scheduled_matches.empty:
+    for _, match in pending_matches.iterrows():
+        # Check if any players in this match are in scheduled matches
+        match_players = [
+            match[config.COL_TEAM1_PLAYER1], match[config.COL_TEAM1_PLAYER2],
+            match[config.COL_TEAM2_PLAYER1], match[config.COL_TEAM2_PLAYER2]
+        ]
+        has_conflict = False
+        for player in match_players:
+            if player in scheduled_matches[config.COL_TEAM1_PLAYER1].values or \
+               player in scheduled_matches[config.COL_TEAM1_PLAYER2].values or \
+               player in scheduled_matches[config.COL_TEAM2_PLAYER1].values or \
+               player in scheduled_matches[config.COL_TEAM2_PLAYER2].values:
+                blocking_players.add(player)
+                has_conflict = True
+        
+        # If we find a match without conflicts, stop collecting blocking players
+        if not has_conflict:
+            break
+
 # Court Status Overview
 st.header("Court Status")
 matches_df = sheets_mgr.read_sheet(config.SHEET_MATCHES)
@@ -105,8 +132,18 @@ if len(active_courts) > 0:
             
             if current_match is not None:
                 st.write(f"**{current_match[config.COL_MATCH_TYPE]}**")
-                st.write(f"T1: {current_match[config.COL_TEAM1_PLAYER1]}, {current_match[config.COL_TEAM1_PLAYER2]}")
-                st.write(f"T2: {current_match[config.COL_TEAM2_PLAYER1]}, {current_match[config.COL_TEAM2_PLAYER2]}")
+                
+                # Format player names with bold if they're blocking a pending match
+                def format_court_player(name):
+                    return f"**{name}**" if name in blocking_players else name
+                
+                team1_p1 = format_court_player(current_match[config.COL_TEAM1_PLAYER1])
+                team1_p2 = format_court_player(current_match[config.COL_TEAM1_PLAYER2])
+                team2_p1 = format_court_player(current_match[config.COL_TEAM2_PLAYER1])
+                team2_p2 = format_court_player(current_match[config.COL_TEAM2_PLAYER2])
+                
+                st.write(f"T1: {team1_p1}, {team1_p2}")
+                st.write(f"T2: {team2_p1}, {team2_p2}")
                 
                 # Cancel button above score fields
                 if st.button("Cancel Match", key=f"cancel_current_{current_match[config.COL_MATCH_ID]}"):
