@@ -1,6 +1,7 @@
 import streamlit as st
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 import pandas as pd
 import numpy as np
 from datetime import datetime
@@ -68,17 +69,61 @@ class SheetsManager:
 
     def read_sheet(self, range_name):
         """Read a sheet and return as DataFrame with proper column names."""
-        try:
-            result = self.sheet.values().get(
-                spreadsheetId=config.SPREADSHEET_ID,
-                range=range_name
-            ).execute()
-            values = result.get('values', [])
-            
-            if not values:
-                # Return empty DataFrame with correct columns
+        max_retries = 3
+        retry_delay = 66  # seconds
+        
+        for attempt in range(max_retries):
+            try:
+                result = self.sheet.values().get(
+                    spreadsheetId=config.SPREADSHEET_ID,
+                    range=range_name
+                ).execute()
+                values = result.get('values', [])
+                
+                if not values:
+                    # Return empty DataFrame with correct columns
+                    if range_name == config.SHEET_PLAYERS:
+                        return pd.DataFrame(columns=[
+                            config.COL_NAME,
+                            config.COL_STATUS,
+                            config.COL_GENDER,
+                            config.COL_TOTAL_POINTS,
+                            config.COL_GAMES_PLAYED,
+                            config.COL_CHECK_IN_TIME,
+                            config.COL_LAST_MATCH_TIME,
+                            config.COL_AVG_POINTS
+                        ])
+                    elif range_name == config.SHEET_MATCHES:
+                        return pd.DataFrame(columns=[
+                            config.COL_MATCH_ID,
+                            config.COL_COURT_NUMBER,
+                            config.COL_TEAM1_PLAYER1,
+                            config.COL_TEAM1_PLAYER2,
+                            config.COL_TEAM2_PLAYER1,
+                            config.COL_TEAM2_PLAYER2,
+                            config.COL_START_TIME,
+                            config.COL_END_TIME,
+                            config.COL_TEAM1_SCORE,
+                            config.COL_TEAM2_SCORE,
+                            config.COL_MATCH_STATUS,
+                            config.COL_MATCH_TYPE
+                        ])
+                    elif range_name == config.SHEET_SCORES:
+                        return pd.DataFrame(columns=[config.COL_MATCH_ID, config.COL_NAME, config.COL_TOTAL_POINTS])
+                    else:
+                        return pd.DataFrame()
+
+                # Get the header row and data
+                header = values[0]
+                data = values[1:]
+
+                # Create DataFrame with actual headers
+                df = pd.DataFrame(data)
+                
+                # Get expected headers for this sheet
+                expected_header = None
                 if range_name == config.SHEET_PLAYERS:
-                    return pd.DataFrame(columns=[
+                    expected_header = [
                         config.COL_NAME,
                         config.COL_STATUS,
                         config.COL_GENDER,
@@ -87,9 +132,9 @@ class SheetsManager:
                         config.COL_CHECK_IN_TIME,
                         config.COL_LAST_MATCH_TIME,
                         config.COL_AVG_POINTS
-                    ])
+                    ]
                 elif range_name == config.SHEET_MATCHES:
-                    return pd.DataFrame(columns=[
+                    expected_header = [
                         config.COL_MATCH_ID,
                         config.COL_COURT_NUMBER,
                         config.COL_TEAM1_PLAYER1,
@@ -102,75 +147,45 @@ class SheetsManager:
                         config.COL_TEAM2_SCORE,
                         config.COL_MATCH_STATUS,
                         config.COL_MATCH_TYPE
-                    ])
+                    ]
                 elif range_name == config.SHEET_SCORES:
-                    return pd.DataFrame(columns=[config.COL_MATCH_ID, config.COL_NAME, config.COL_TOTAL_POINTS])
-                else:
-                    return pd.DataFrame()
+                    expected_header = [config.COL_MATCH_ID, config.COL_NAME, config.COL_TOTAL_POINTS]
 
-            # Get the header row and data
-            header = values[0]
-            data = values[1:]
-
-            # Create DataFrame with actual headers
-            df = pd.DataFrame(data)
-            
-            # Get expected headers for this sheet
-            expected_header = None
-            if range_name == config.SHEET_PLAYERS:
-                expected_header = [
-                    config.COL_NAME,
-                    config.COL_STATUS,
-                    config.COL_GENDER,
-                    config.COL_TOTAL_POINTS,
-                    config.COL_GAMES_PLAYED,
-                    config.COL_CHECK_IN_TIME,
-                    config.COL_LAST_MATCH_TIME,
-                    config.COL_AVG_POINTS
-                ]
-            elif range_name == config.SHEET_MATCHES:
-                expected_header = [
-                    config.COL_MATCH_ID,
-                    config.COL_COURT_NUMBER,
-                    config.COL_TEAM1_PLAYER1,
-                    config.COL_TEAM1_PLAYER2,
-                    config.COL_TEAM2_PLAYER1,
-                    config.COL_TEAM2_PLAYER2,
-                    config.COL_START_TIME,
-                    config.COL_END_TIME,
-                    config.COL_TEAM1_SCORE,
-                    config.COL_TEAM2_SCORE,
-                    config.COL_MATCH_STATUS,
-                    config.COL_MATCH_TYPE
-                ]
-            elif range_name == config.SHEET_SCORES:
-                expected_header = [config.COL_MATCH_ID, config.COL_NAME, config.COL_TOTAL_POINTS]
-
-            if expected_header:
-                # Map actual column positions to expected columns
-                column_mapping = {}
-                for i, col in enumerate(header):
-                    if col in expected_header:
-                        column_mapping[i] = expected_header.index(col)
+                if expected_header:
+                    # Map actual column positions to expected columns
+                    column_mapping = {}
+                    for i, col in enumerate(header):
+                        if col in expected_header:
+                            column_mapping[i] = expected_header.index(col)
+                    
+                    # Reorder and pad columns as needed
+                    reordered_data = []
+                    for row in data:
+                        new_row = [''] * len(expected_header)
+                        for i, val in enumerate(row):
+                            if i in column_mapping:
+                                new_pos = column_mapping[i]
+                                new_row[new_pos] = val
+                        reordered_data.append(new_row)
+                    
+                    # Create new DataFrame with expected headers and reordered data
+                    df = pd.DataFrame(reordered_data, columns=expected_header)
                 
-                # Reorder and pad columns as needed
-                reordered_data = []
-                for row in data:
-                    new_row = [''] * len(expected_header)
-                    for i, val in enumerate(row):
-                        if i in column_mapping:
-                            new_pos = column_mapping[i]
-                            new_row[new_pos] = val
-                    reordered_data.append(new_row)
-                
-                # Create new DataFrame with expected headers and reordered data
-                df = pd.DataFrame(reordered_data, columns=expected_header)
-            
-            return df
+                return df
 
-        except Exception as e:
-            st.write(f"Error reading sheet: {str(e)}")
-            return pd.DataFrame()
+            except HttpError as e:
+                if e.resp.status == 429:  # Quota exceeded error
+                    if attempt < max_retries - 1:
+                        st.warning(f"Google Sheets quota exceeded. Waiting 1 minute before retry {attempt + 1}/{max_retries}...")
+                        time.sleep(retry_delay)
+                        continue
+                st.error(f"Error reading sheet after {max_retries} attempts: {str(e)}")
+                return pd.DataFrame()
+            except Exception as e:
+                st.error(f"Error reading sheet: {str(e)}")
+                return pd.DataFrame()
+
+        return pd.DataFrame()
 
     def _verify_sheet_update(self, range_name, expected_values, max_retries=3):
         """Verify that the sheet has been updated correctly with the expected values."""
@@ -782,11 +797,43 @@ class SheetsManager:
             st.error(f"Error generating matches: {str(e)}")
             return False
 
+    def _get_player_interactions(self, matches_df):
+        """Track who has played with/against whom."""
+        interactions = {}  # {player: {'with': set(), 'against': set()}}
+        
+        for _, match in matches_df.iterrows():
+            team1 = [match[config.COL_TEAM1_PLAYER1], match[config.COL_TEAM1_PLAYER2]]
+            team2 = [match[config.COL_TEAM2_PLAYER1], match[config.COL_TEAM2_PLAYER2]]
+            all_players = team1 + team2
+            
+            # Initialize if needed
+            for player in all_players:
+                if player not in interactions:
+                    interactions[player] = {'with': set(), 'against': set()}
+            
+            # Record interactions
+            for p1 in team1:
+                interactions[p1]['with'].add(team1[1] if p1 == team1[0] else team1[0])
+                for p2 in team2:
+                    interactions[p1]['against'].add(p2)
+            
+            for p1 in team2:
+                interactions[p1]['with'].add(team2[1] if p1 == team2[0] else team2[0])
+                for p2 in team1:
+                    interactions[p1]['against'].add(p2)
+        
+        return interactions
+
     def _generate_matches(self, active_players, court_count, matches_df):
         """Generate optimal matches based on player history"""
         try:
             # Get player genders from players sheet
             players_df = self.read_sheet(config.SHEET_PLAYERS)
+            
+            # Filter out any players that are not marked as Active in the sheet
+            active_status_players = set(players_df[players_df[config.COL_STATUS] == "Active"][config.COL_NAME])
+            active_players = [p for p in active_players if p in active_status_players]
+            
             player_genders = dict(zip(players_df[config.COL_NAME], players_df[config.COL_GENDER]))
             
             # Split players by gender using the players sheet information
@@ -797,124 +844,159 @@ class SheetsManager:
             st.write(f"Male players: {len(male_players)}")
             st.write(f"Female players: {len(female_players)}")
             
-            # Calculate ideal distribution for match types
-            # With 6 courts and 40 players (20 each gender), we want roughly:
-            # - 40% Mixed (ensures everyone gets to play mixed)
-            # - 30% Mens
-            # - 30% Womens
+            # Calculate dynamic distribution based on available players
+            total_players = len(male_players) + len(female_players)
+            available_pairs = min(len(male_players), len(female_players))
+            mixed_ratio = min(0.5, available_pairs * 2 / total_players)
+            gender_ratio = (1 - mixed_ratio) / 2
+            
             total_matches = min(court_count, len(active_players) // 4)
-            mixed_count = max(1, int(total_matches * 0.4))
-            mens_count = max(1, int(total_matches * 0.3))
+            mixed_count = max(1, int(total_matches * mixed_ratio))
+            mens_count = max(1, int(total_matches * gender_ratio))
             womens_count = total_matches - mixed_count - mens_count
             
-            # Get match history for fairness
+            # Get match history and interactions
             player_match_counts = self._get_player_match_counts(matches_df, active_players)
+            player_interactions = self._get_player_interactions(matches_df)
+            
+            # Initialize if not in interactions
+            for player in active_players:
+                if player not in player_interactions:
+                    player_interactions[player] = {'with': set(), 'against': set()}
             
             new_matches = []
             match_id_counter = self._get_next_match_id(matches_df)
             
-            # Helper function to get least played players
-            def get_least_played_players(players, count):
-                sorted_players = sorted(players, key=lambda p: player_match_counts.get(p, 0))
-                return sorted_players[:count]
+            # Determine match generation order based on last match type
+            last_match = matches_df.iloc[-1] if not matches_df.empty else None
+            last_type = last_match[config.COL_MATCH_TYPE] if last_match is not None else None
             
-            # Generate mixed matches
-            for _ in range(mixed_count):
-                if len(male_players) >= 2 and len(female_players) >= 2:
-                    # Get least played players from each gender
-                    selected_males = get_least_played_players(male_players, 2)
-                    selected_females = get_least_played_players(female_players, 2)
-                    
-                    # Create match with alternating gender pairs
-                    match = {
-                        config.COL_MATCH_ID: f"M{match_id_counter}",
-                        config.COL_COURT_NUMBER: "",
-                        config.COL_TEAM1_PLAYER1: selected_males[0],
-                        config.COL_TEAM1_PLAYER2: selected_females[0],
-                        config.COL_TEAM2_PLAYER1: selected_males[1],
-                        config.COL_TEAM2_PLAYER2: selected_females[1],
-                        config.COL_START_TIME: "",
-                        config.COL_END_TIME: "",
-                        config.COL_TEAM1_SCORE: "",
-                        config.COL_TEAM2_SCORE: "",
-                        config.COL_MATCH_TYPE: "Mixed"
-                    }
-                    new_matches.append(match)
-                    match_id_counter += 1
-                    
-                    # Remove used players
-                    for player in selected_males + selected_females:
-                        player_match_counts[player] = player_match_counts.get(player, 0) + 1
-                    male_players = [p for p in male_players if p not in selected_males]
-                    female_players = [p for p in female_players if p not in selected_females]
+            match_types = []
+            if last_type == "Mixed":
+                match_types = ["Mens", "Womens", "Mixed"]
+            elif last_type == "Mens":
+                match_types = ["Womens", "Mixed", "Mens"]
+            else:
+                match_types = ["Mixed", "Mens", "Womens"]
             
-            # Generate mens matches
-            for _ in range(mens_count):
-                if len(male_players) >= 4:
-                    selected_players = get_least_played_players(male_players, 4)
-                    match = {
-                        config.COL_MATCH_ID: f"M{match_id_counter}",
-                        config.COL_COURT_NUMBER: "",
-                        config.COL_TEAM1_PLAYER1: selected_players[0],
-                        config.COL_TEAM1_PLAYER2: selected_players[1],
-                        config.COL_TEAM2_PLAYER1: selected_players[2],
-                        config.COL_TEAM2_PLAYER2: selected_players[3],
-                        config.COL_START_TIME: "",
-                        config.COL_END_TIME: "",
-                        config.COL_TEAM1_SCORE: "",
-                        config.COL_TEAM2_SCORE: "",
-                        config.COL_MATCH_TYPE: "Mens"
-                    }
-                    new_matches.append(match)
-                    match_id_counter += 1
-                    
-                    # Remove used players
-                    for player in selected_players:
-                        player_match_counts[player] = player_match_counts.get(player, 0) + 1
-                    male_players = [p for p in male_players if p not in selected_players]
-            
-            # Generate womens matches
-            for _ in range(womens_count):
-                if len(female_players) >= 4:
-                    selected_players = get_least_played_players(female_players, 4)
-                    match = {
-                        config.COL_MATCH_ID: f"M{match_id_counter}",
-                        config.COL_COURT_NUMBER: "",
-                        config.COL_TEAM1_PLAYER1: selected_players[0],
-                        config.COL_TEAM1_PLAYER2: selected_players[1],
-                        config.COL_TEAM2_PLAYER1: selected_players[2],
-                        config.COL_TEAM2_PLAYER2: selected_players[3],
-                        config.COL_START_TIME: "",
-                        config.COL_END_TIME: "",
-                        config.COL_TEAM1_SCORE: "",
-                        config.COL_TEAM2_SCORE: "",
-                        config.COL_MATCH_TYPE: "Womens"
-                    }
-                    new_matches.append(match)
-                    match_id_counter += 1
-                    
-                    # Remove used players
-                    for player in selected_players:
-                        player_match_counts[player] = player_match_counts.get(player, 0) + 1
-                    female_players = [p for p in female_players if p not in selected_players]
-            
-            # Validate match types
-            for match in new_matches:
-                players = [
-                    match[config.COL_TEAM1_PLAYER1],
-                    match[config.COL_TEAM1_PLAYER2],
-                    match[config.COL_TEAM2_PLAYER1],
-                    match[config.COL_TEAM2_PLAYER2]
-                ]
-                genders = [player_genders.get(p) for p in players]
+            # Helper function to score player combinations
+            def score_combination(players, match_type):
+                score = 0
+                # Prioritize players with fewer games
+                games_played = [player_match_counts.get(p, 0) for p in players]
+                score -= max(games_played) * 2  # Heavily penalize players with many games
                 
-                # Determine correct match type
-                if all(g == config.GENDER_MALE for g in genders):
-                    match[config.COL_MATCH_TYPE] = "Mens"
-                elif all(g == config.GENDER_FEMALE for g in genders):
-                    match[config.COL_MATCH_TYPE] = "Womens"
-                else:
-                    match[config.COL_MATCH_TYPE] = "Mixed"
+                # Check previous interactions
+                for i, p1 in enumerate(players):
+                    for p2 in players[i+1:]:
+                        # Penalize if they've played together or against each other
+                        if p2 in player_interactions[p1]['with']:
+                            score -= 3
+                        if p2 in player_interactions[p1]['against']:
+                            score -= 2
+                
+                return score
+            
+            # Helper function to get optimal player combination
+            def get_optimal_players(available_players, count):
+                if len(available_players) < count:
+                    return None
+                
+                # Get players with fewest games first
+                sorted_players = sorted(available_players, key=lambda p: player_match_counts.get(p, 0))
+                candidates = sorted_players[:min(count * 2, len(sorted_players))]
+                
+                # Try different combinations of players
+                best_score = float('-inf')
+                best_combination = None
+                
+                from itertools import combinations
+                for combo in combinations(candidates, count):
+                    score = score_combination(combo, "")
+                    if score > best_score:
+                        best_score = score
+                        best_combination = combo
+                
+                return list(best_combination) if best_combination else None
+            
+            # Generate matches in determined order
+            for match_type in match_types:
+                count = mixed_count if match_type == "Mixed" else mens_count if match_type == "Mens" else womens_count
+                for _ in range(count):
+                    if match_type == "Mixed":
+                        if len(male_players) >= 2 and len(female_players) >= 2:
+                            males = get_optimal_players(male_players, 2)
+                            females = get_optimal_players(female_players, 2)
+                            if males and females:
+                                match = {
+                                    config.COL_MATCH_ID: f"M{match_id_counter}",
+                                    config.COL_COURT_NUMBER: "",
+                                    config.COL_TEAM1_PLAYER1: males[0],
+                                    config.COL_TEAM1_PLAYER2: females[0],
+                                    config.COL_TEAM2_PLAYER1: males[1],
+                                    config.COL_TEAM2_PLAYER2: females[1],
+                                    config.COL_START_TIME: "",
+                                    config.COL_END_TIME: "",
+                                    config.COL_TEAM1_SCORE: "",
+                                    config.COL_TEAM2_SCORE: "",
+                                    config.COL_MATCH_TYPE: "Mixed"
+                                }
+                                new_matches.append(match)
+                                match_id_counter += 1
+                                
+                                # Update counts and remove used players
+                                for player in males + females:
+                                    player_match_counts[player] = player_match_counts.get(player, 0) + 1
+                                male_players = [p for p in male_players if p not in males]
+                                female_players = [p for p in female_players if p not in females]
+                    
+                    elif match_type == "Mens" and len(male_players) >= 4:
+                        players = get_optimal_players(male_players, 4)
+                        if players:
+                            match = {
+                                config.COL_MATCH_ID: f"M{match_id_counter}",
+                                config.COL_COURT_NUMBER: "",
+                                config.COL_TEAM1_PLAYER1: players[0],
+                                config.COL_TEAM1_PLAYER2: players[1],
+                                config.COL_TEAM2_PLAYER1: players[2],
+                                config.COL_TEAM2_PLAYER2: players[3],
+                                config.COL_START_TIME: "",
+                                config.COL_END_TIME: "",
+                                config.COL_TEAM1_SCORE: "",
+                                config.COL_TEAM2_SCORE: "",
+                                config.COL_MATCH_TYPE: "Mens"
+                            }
+                            new_matches.append(match)
+                            match_id_counter += 1
+                            
+                            # Update counts and remove used players
+                            for player in players:
+                                player_match_counts[player] = player_match_counts.get(player, 0) + 1
+                            male_players = [p for p in male_players if p not in players]
+                    
+                    elif match_type == "Womens" and len(female_players) >= 4:
+                        players = get_optimal_players(female_players, 4)
+                        if players:
+                            match = {
+                                config.COL_MATCH_ID: f"M{match_id_counter}",
+                                config.COL_COURT_NUMBER: "",
+                                config.COL_TEAM1_PLAYER1: players[0],
+                                config.COL_TEAM1_PLAYER2: players[1],
+                                config.COL_TEAM2_PLAYER1: players[2],
+                                config.COL_TEAM2_PLAYER2: players[3],
+                                config.COL_START_TIME: "",
+                                config.COL_END_TIME: "",
+                                config.COL_TEAM1_SCORE: "",
+                                config.COL_TEAM2_SCORE: "",
+                                config.COL_MATCH_TYPE: "Womens"
+                            }
+                            new_matches.append(match)
+                            match_id_counter += 1
+                            
+                            # Update counts and remove used players
+                            for player in players:
+                                player_match_counts[player] = player_match_counts.get(player, 0) + 1
+                            female_players = [p for p in female_players if p not in players]
             
             return new_matches if new_matches else None
             
