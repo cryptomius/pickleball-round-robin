@@ -4,7 +4,8 @@ from pickleball import config
 import pandas as pd
 import time
 
-st.set_page_config(page_title="Match Management - Pickleball Round Robin", layout="wide")
+# Force light theme
+st.set_page_config(page_title="Match Management - Pickleball Round Robin", layout="wide", initial_sidebar_state="collapsed")
 sheets_mgr = SheetsManager()
 
 st.title("Match Management")

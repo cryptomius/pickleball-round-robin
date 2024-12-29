@@ -5,6 +5,9 @@ import PIL.Image
 
 PLAYER_APP_URL = 'https://pickleball-tournament.streamlit.app/'
 
+# Force light theme
+st.set_page_config(page_title="Player App", layout="wide", initial_sidebar_state="collapsed")
+
 st.title("Player App")
 
 # Add custom CSS and JavaScript for copy functionality

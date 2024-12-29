@@ -6,6 +6,9 @@ import plotly.express as px
 from datetime import datetime, timedelta
 import random
 
+# Force light theme
+st.set_page_config(page_title="Tournament Simulation", layout="wide", initial_sidebar_state="collapsed")
+
 class TournamentSimulator:
     def __init__(self, total_players, gender_ratio=0.5, courts=6, match_duration=20, changeover_time=5):
         """

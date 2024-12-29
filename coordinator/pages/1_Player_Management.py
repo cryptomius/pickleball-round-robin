@@ -3,7 +3,7 @@ from pickleball.sheets_manager import SheetsManager
 from pickleball import config
 import pandas as pd
 
-st.set_page_config(page_title="Player Management - Pickleball Round Robin", layout="wide")
+st.set_page_config(page_title="Player Management - Pickleball Round Robin", layout="wide", initial_sidebar_state="collapsed")
 sheets_mgr = SheetsManager()
 
 # Get and sort players alphabetically

@@ -4,12 +4,8 @@ from pickleball import config
 import qrcode
 import io
 
-st.set_page_config(
-    page_title="Home - Pickleball Round Robin",
-    page_icon="🏸",
-    layout="wide",
-)
-
+# Force light theme
+st.set_page_config(page_title="Pickleball Tournament Coordinator", layout="wide", initial_sidebar_state="collapsed")
 
 # Add custom CSS
 st.markdown("""

@@ -64,6 +64,7 @@ def main():
     st.set_page_config(
         page_title="Pickleball Round Robin - Player View",
         layout="wide",
+        initial_sidebar_state="collapsed",
         page_icon="🏸",
         menu_items=None
     )
