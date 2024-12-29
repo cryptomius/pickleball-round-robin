@@ -33,19 +33,45 @@ class TournamentSimulator:
         self.player_stats = {p: {"matches": 0, "mens": 0, "womens": 0, "mixed": 0, "wait_times": []} for p in self.all_players}
         self.current_time = 0  # in minutes
         
+        # Track match type ratios
+        self.match_type_counts = {"mens": 0, "womens": 0, "mixed": 0}
+        
     def generate_match(self, available_players):
         """Generate a match based on available players"""
         available_males = [p for p in available_players if p.startswith("M")]
         available_females = [p for p in available_players if p.startswith("F")]
         
-        # Determine match type probabilities based on available players
+        # Calculate current ratios for each gender
+        male_ratio = 0
+        female_ratio = 0
+        
+        total_male_matches = sum(self.player_stats[p]["mens"] for p in self.male_players)
+        total_male_mixed = sum(self.player_stats[p]["mixed"] for p in self.male_players)
+        if total_male_matches + total_male_mixed > 0:
+            male_ratio = total_male_mixed / (total_male_matches + total_male_mixed)
+            
+        total_female_matches = sum(self.player_stats[p]["womens"] for p in self.female_players)
+        total_female_mixed = sum(self.player_stats[p]["mixed"] for p in self.female_players)
+        if total_female_matches + total_female_mixed > 0:
+            female_ratio = total_female_mixed / (total_female_matches + total_female_mixed)
+        
+        # Determine available match types
         match_types = []
-        if len(available_males) >= 4:
+        if len(available_males) >= 4 and male_ratio > 0.5:
             match_types.append("mens")
-        if len(available_females) >= 4:
+        if len(available_females) >= 4 and female_ratio > 0.5:
             match_types.append("womens")
-        if len(available_males) >= 2 and len(available_females) >= 2:
+        if len(available_males) >= 2 and len(available_females) >= 2 and (male_ratio < 0.5 or female_ratio < 0.5):
             match_types.append("mixed")
+            
+        # If no preferred types available, fall back to all possible types
+        if not match_types:
+            if len(available_males) >= 4:
+                match_types.append("mens")
+            if len(available_females) >= 4:
+                match_types.append("womens")
+            if len(available_males) >= 2 and len(available_females) >= 2:
+                match_types.append("mixed")
             
         if not match_types:
             return None
@@ -231,6 +257,7 @@ def main():
     })
     fig = px.line(match_type_df, x="Players", y=["Men's Doubles", "Women's Doubles", "Mixed Doubles"],
                   title="Number of Matches by Type")
+    fig.update_layout(yaxis_range=[0, 60])
     st.plotly_chart(fig)
     
     # Plot wait times

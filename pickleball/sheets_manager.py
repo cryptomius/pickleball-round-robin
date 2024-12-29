@@ -844,16 +844,70 @@ class SheetsManager:
             st.write(f"Male players: {len(male_players)}")
             st.write(f"Female players: {len(female_players)}")
             
-            # Calculate dynamic distribution based on available players
+            # Calculate match type ratios for each gender from match history
+            male_match_counts = {"mens": 0, "mixed": 0}
+            female_match_counts = {"womens": 0, "mixed": 0}
+            
+            for _, match in matches_df.iterrows():
+                match_type = match[config.COL_MATCH_TYPE]
+                players = [
+                    match[config.COL_TEAM1_PLAYER1],
+                    match[config.COL_TEAM1_PLAYER2],
+                    match[config.COL_TEAM2_PLAYER1],
+                    match[config.COL_TEAM2_PLAYER2]
+                ]
+                
+                if match_type == "Mixed":
+                    for player in players:
+                        if pd.notna(player):
+                            if player_genders.get(player) == config.GENDER_MALE:
+                                male_match_counts["mixed"] += 1
+                            elif player_genders.get(player) == config.GENDER_FEMALE:
+                                female_match_counts["mixed"] += 1
+                elif match_type == "Mens":
+                    for player in players:
+                        if pd.notna(player):
+                            male_match_counts["mens"] += 1
+                elif match_type == "Womens":
+                    for player in players:
+                        if pd.notna(player):
+                            female_match_counts["womens"] += 1
+            
+            # Calculate ratios
+            male_ratio = 0
+            total_male_matches = male_match_counts["mens"] + male_match_counts["mixed"]
+            if total_male_matches > 0:
+                male_ratio = male_match_counts["mixed"] / total_male_matches
+                
+            female_ratio = 0
+            total_female_matches = female_match_counts["womens"] + female_match_counts["mixed"]
+            if total_female_matches > 0:
+                female_ratio = female_match_counts["mixed"] / total_female_matches
+            
+            # Calculate dynamic distribution based on available players and match history
             total_players = len(male_players) + len(female_players)
             available_pairs = min(len(male_players), len(female_players))
-            mixed_ratio = min(0.5, available_pairs * 2 / total_players)
-            gender_ratio = (1 - mixed_ratio) / 2
             
+            # Adjust match type distribution based on current ratios
             total_matches = min(court_count, len(active_players) // 4)
-            mixed_count = max(1, int(total_matches * mixed_ratio))
-            mens_count = max(1, int(total_matches * gender_ratio))
-            womens_count = total_matches - mixed_count - mens_count
+            
+            # Prioritize match types to balance ratios
+            match_types = []
+            if male_ratio > 0.5 and len(male_players) >= 4:
+                match_types.append("Mens")
+            if female_ratio > 0.5 and len(female_players) >= 4:
+                match_types.append("Womens")
+            if (male_ratio < 0.5 or female_ratio < 0.5) and len(male_players) >= 2 and len(female_players) >= 2:
+                match_types.append("Mixed")
+                
+            # If no preferred types available, fall back to all possible types
+            if not match_types:
+                if len(male_players) >= 4:
+                    match_types.append("Mens")
+                if len(female_players) >= 4:
+                    match_types.append("Womens")
+                if len(male_players) >= 2 and len(female_players) >= 2:
+                    match_types.append("Mixed")
             
             # Get match history and interactions
             player_match_counts = self._get_player_match_counts(matches_df, active_players)
@@ -921,7 +975,7 @@ class SheetsManager:
             
             # Generate matches in determined order
             for match_type in match_types:
-                count = mixed_count if match_type == "Mixed" else mens_count if match_type == "Mens" else womens_count
+                count = 1
                 for _ in range(count):
                     if match_type == "Mixed":
                         if len(male_players) >= 2 and len(female_players) >= 2:
