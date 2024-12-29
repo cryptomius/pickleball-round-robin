@@ -40,7 +40,7 @@ credentials.json
 *.p12
 
 # Streamlit
-.streamlit/
+.streamlit/secrets.toml
 
 # Local development
 .DS_Store
