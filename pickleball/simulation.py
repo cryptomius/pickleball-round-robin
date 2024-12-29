@@ -33,14 +33,70 @@ class TournamentSimulator:
         
         # Initialize tracking variables
         self.matches_played = []
-        self.player_stats = {p: {"matches": 0, "mens": 0, "womens": 0, "mixed": 0, "wait_times": []} for p in self.all_players}
+        self.player_stats = {p: {
+            "matches": 0, 
+            "mens": 0, 
+            "womens": 0, 
+            "mixed": 0, 
+            "wait_times": [], 
+            "last_match_time": 0,  # Track last match time for wait time calculation
+            "partners": set(),  # Track who they've played with
+            "opponents": set()  # Track who they've played against
+        } for p in self.all_players}
         self.current_time = 0  # in minutes
         
         # Track match type ratios
         self.match_type_counts = {"mens": 0, "womens": 0, "mixed": 0}
         
+    def score_combination(self, players, available_players):
+        """Score a potential combination of players based on various factors"""
+        score = 0
+        
+        # Factor 1: Wait time priority
+        wait_times = [self.current_time - self.player_stats[p]["last_match_time"] for p in players]
+        max_wait_time = max(wait_times)
+        score += max_wait_time * 3  # Heavily weight wait times
+        
+        # Factor 2: Match count balancing
+        games_played = [self.player_stats[p]["matches"] for p in players]
+        score -= max(games_played) * 2  # Penalize players with many games
+        
+        # Factor 3: Player interaction history
+        for i, p1 in enumerate(players):
+            for p2 in players[i+1:]:
+                # Penalize if they've played together or against each other
+                if p2 in self.player_stats[p1]["partners"]:
+                    score -= 3
+                if p2 in self.player_stats[p1]["opponents"]:
+                    score -= 2
+        
+        return score
+
+    def get_optimal_players(self, available_players, count, gender=None):
+        """Get the optimal combination of players based on various factors"""
+        if gender:
+            candidates = [p for p in available_players if (p.startswith("M") if gender == "M" else p.startswith("F"))]
+        else:
+            candidates = available_players
+            
+        if len(candidates) < count:
+            return None
+            
+        # Try different combinations of players
+        best_score = float('-inf')
+        best_combination = None
+        
+        from itertools import combinations
+        for combo in combinations(candidates, count):
+            score = self.score_combination(combo, available_players)
+            if score > best_score:
+                best_score = score
+                best_combination = combo
+        
+        return list(best_combination) if best_combination else None
+
     def generate_match(self, available_players):
-        """Generate a match based on available players"""
+        """Generate a match based on available players with enhanced selection logic"""
         available_males = [p for p in available_players if p.startswith("M")]
         available_females = [p for p in available_players if p.startswith("F")]
         
@@ -82,18 +138,35 @@ class TournamentSimulator:
         match_type = random.choice(match_types)
         
         if match_type == "mens":
-            players = random.sample(available_males, 4)
+            players = self.get_optimal_players(available_males, 4, "M")
+            if not players:
+                return None
             team1 = players[:2]
             team2 = players[2:]
         elif match_type == "womens":
-            players = random.sample(available_females, 4)
+            players = self.get_optimal_players(available_females, 4, "F")
+            if not players:
+                return None
             team1 = players[:2]
             team2 = players[2:]
         else:  # mixed
-            males = random.sample(available_males, 2)
-            females = random.sample(available_females, 2)
+            males = self.get_optimal_players(available_males, 2, "M")
+            females = self.get_optimal_players(available_females, 2, "F")
+            if not males or not females:
+                return None
             team1 = [males[0], females[0]]
             team2 = [males[1], females[1]]
+            
+        # Update player interaction tracking
+        for p1 in team1:
+            self.player_stats[p1]["partners"].add(team1[1] if p1 == team1[0] else team1[0])
+            for p2 in team2:
+                self.player_stats[p1]["opponents"].add(p2)
+                
+        for p1 in team2:
+            self.player_stats[p1]["partners"].add(team2[1] if p1 == team2[0] else team2[0])
+            for p2 in team1:
+                self.player_stats[p1]["opponents"].add(p2)
             
         return {
             "type": match_type,
@@ -137,6 +210,7 @@ class TournamentSimulator:
                                          and m != new_match] + [0])
                     wait_time = new_match["start_time"] - last_match_time if last_match_time > 0 else 0
                     self.player_stats[player]["wait_times"].append(wait_time)
+                    self.player_stats[player]["last_match_time"] = new_match["end_time"]
                 
                 # Update available players
                 busy_players.update(new_match["team1"] + new_match["team2"])
@@ -173,7 +247,8 @@ def run_tournament_analysis(num_players):
         "match_counts": {
             "min": min(match_counts),
             "max": max(match_counts),
-            "avg": np.mean(match_counts)
+            "avg": np.mean(match_counts),
+            "all_counts": match_counts  # Store all match counts for box plot
         },
         "mens_counts_male": {
             "min": min(mens_counts_male),
@@ -198,7 +273,8 @@ def run_tournament_analysis(num_players):
         "wait_times": {
             "min": min(wait_times),
             "max": max(wait_times),
-            "avg": np.mean(wait_times)
+            "avg": np.mean(wait_times),
+            "all_times": wait_times  # Store all wait times for box plot
         },
         "match_type_counts": match_type_counts
     }
@@ -207,15 +283,18 @@ def main():
     st.title("Pickleball Tournament Simulation Analysis")
     st.write("Analyze tournament dynamics for different player counts")
     
-    # Run simulations for player counts 30-60
-    player_counts = list(range(30, 61, 2))
+    # Run simulations for player counts 20-60
+    player_counts = list(range(20, 61, 2))
     results = []
     
     for count in player_counts:
         result = run_tournament_analysis(count)
         results.append({
             "players": count,
-            **result["match_counts"],
+            "min": result["match_counts"]["min"],
+            "max": result["match_counts"]["max"],
+            "avg": result["match_counts"]["avg"],
+            "match_counts": result["match_counts"]["all_counts"],  # Store all match counts
             "mens_matches": result["match_type_counts"]["mens"],
             "womens_matches": result["match_type_counts"]["womens"],
             "mixed_matches": result["match_type_counts"]["mixed"],
@@ -232,52 +311,101 @@ def main():
             "womens_counts_female_avg": result["womens_counts_female"]["avg"],
             "mixed_counts_female_min": result["mixed_counts_female"]["min"],
             "mixed_counts_female_max": result["mixed_counts_female"]["max"],
-            "mixed_counts_female_avg": result["mixed_counts_female"]["avg"]
+            "mixed_counts_female_avg": result["mixed_counts_female"]["avg"],
+            "wait_times": result["wait_times"]["all_times"]
         })
     
     df = pd.DataFrame(results)
     
     # Plot match distribution
     st.subheader("Match Count Distribution by Player Count")
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df["players"], y=df["min"], name="Min Matches", line=dict(dash="dash")))
-    fig.add_trace(go.Scatter(x=df["players"], y=df["max"], name="Max Matches", line=dict(dash="dash")))
-    fig.add_trace(go.Scatter(x=df["players"], y=df["avg"], name="Avg Matches"))
+    
+    # Create a list to store all match counts with their corresponding player count
+    all_match_counts = []
+    all_player_counts = []
+    
+    for idx, row in df.iterrows():
+        player_count = row['players']
+        match_counts = row['match_counts']
+        all_match_counts.extend(match_counts)
+        all_player_counts.extend([player_count] * len(match_counts))
+    
+    match_count_df = pd.DataFrame({
+        'Player Count': all_player_counts,
+        'Number of Matches': all_match_counts
+    })
+    
+    # Create box plot
+    fig = px.box(match_count_df, x='Player Count', y='Number of Matches',
+                 title='Match Distribution per Player')
+    
+    # Calculate medians per player count
+    median_matches = match_count_df.groupby('Player Count')['Number of Matches'].median().reset_index()
+    
+    # Add line plot for medians
+    fig.add_trace(
+        go.Scatter(
+            x=median_matches['Player Count'],
+            y=median_matches['Number of Matches'],
+            mode='lines',
+            name='Median',
+            line=dict(color='red', width=4)
+        )
+    )
+    
     fig.update_layout(
         xaxis_title="Number of Players",
         yaxis_title="Number of Matches",
-        title="Match Distribution per Player"
+        showlegend=True
     )
-    st.plotly_chart(fig)
-    
-    # Plot match type distribution
-    st.subheader("Match Type Distribution")
-    match_type_df = pd.DataFrame({
-        "Players": df["players"],
-        "Men's Doubles": df["mens_matches"],
-        "Women's Doubles": df["womens_matches"],
-        "Mixed Doubles": df["mixed_matches"]
-    })
-    fig = px.line(match_type_df, x="Players", y=["Men's Doubles", "Women's Doubles", "Mixed Doubles"],
-                  title="Number of Matches by Type")
-    fig.update_layout(yaxis_range=[0, 60])
-    st.plotly_chart(fig)
+    st.plotly_chart(fig, use_container_width=True)
     
     # Plot wait times
     st.subheader("Wait Time Analysis")
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df["players"], y=df["avg_wait_time"], name="Avg Wait Time"))
-    fig.add_trace(go.Scatter(x=df["players"], y=df["max_wait_time"], name="Max Wait Time", line=dict(dash="dash")))
+    
+    # Create a list to store all wait times with their corresponding player count
+    all_wait_times = []
+    all_player_counts = []
+    
+    for idx, row in df.iterrows():
+        player_count = row['players']
+        wait_times = row['wait_times']
+        all_wait_times.extend(wait_times)
+        all_player_counts.extend([player_count] * len(wait_times))
+    
+    wait_time_df = pd.DataFrame({
+        'Player Count': all_player_counts,
+        'Wait Time (minutes)': all_wait_times
+    })
+    
+    # Create box plot
+    fig = px.box(wait_time_df, x='Player Count', y='Wait Time (minutes)',
+                 title='Wait Time Distribution by Player Count')
+    
+    # Calculate medians per player count
+    median_wait_times = wait_time_df.groupby('Player Count')['Wait Time (minutes)'].median().reset_index()
+    
+    # Add line plot for medians
+    fig.add_trace(
+        go.Scatter(
+            x=median_wait_times['Player Count'],
+            y=median_wait_times['Wait Time (minutes)'],
+            mode='lines',
+            name='Median',
+            line=dict(color='red', width=4)
+        )
+    )
+    
     fig.update_layout(
         xaxis_title="Number of Players",
         yaxis_title="Wait Time (minutes)",
-        title="Player Wait Times"
+        showlegend=True
     )
-    st.plotly_chart(fig)
-    
+    st.plotly_chart(fig, use_container_width=True)
+
     # Show detailed statistics for a specific player count
     st.subheader("Detailed Statistics for Specific Player Count")
-    selected_count = st.selectbox("Select number of players", player_counts)
+    selected_count = st.selectbox("Select number of players", player_counts, index=player_counts.index(30))
     selected_stats = df[df["players"] == selected_count].iloc[0]
     
     col1, col2, col3 = st.columns(3)

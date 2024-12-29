@@ -824,6 +824,59 @@ class SheetsManager:
         
         return interactions
 
+    def _calculate_wait_time(self, player, current_time):
+        """Calculate how long a player has been waiting since their last match."""
+        matches_df = self.read_sheet(config.SHEET_MATCHES)
+        player_matches = matches_df[
+            (matches_df[config.COL_TEAM1_PLAYER1] == player) |
+            (matches_df[config.COL_TEAM1_PLAYER2] == player) |
+            (matches_df[config.COL_TEAM2_PLAYER1] == player) |
+            (matches_df[config.COL_TEAM2_PLAYER2] == player)
+        ]
+        
+        if player_matches.empty:
+            return float('inf')  # Player hasn't played yet
+            
+        last_match = player_matches.iloc[-1]
+        last_match_time = last_match[config.COL_END_TIME]
+        
+        if pd.isna(last_match_time) or last_match_time == "":
+            return float('inf')
+            
+        try:
+            last_match_dt = datetime.strptime(last_match_time, "%Y-%m-%d %H:%M:%S")
+            current_dt = datetime.strptime(current_time, "%Y-%m-%d %H:%M:%S")
+            wait_time = (current_dt - last_match_dt).total_seconds() / 60  # Convert to minutes
+            return wait_time
+        except:
+            return float('inf')
+
+    def score_combination(self, players, match_type):
+        score = 0
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # Get wait times for all players
+        wait_times = [self._calculate_wait_time(p, current_time) for p in players]
+        max_wait_time = max(wait_times)
+        
+        # Heavily prioritize players who have been waiting longer
+        score += max_wait_time * 3  # Increase score for players waiting longer
+        
+        # Prioritize players with fewer games
+        games_played = [self.player_match_counts.get(p, 0) for p in players]
+        score -= max(games_played) * 2  # Penalize players with many games
+        
+        # Check previous interactions
+        for i, p1 in enumerate(players):
+            for p2 in players[i+1:]:
+                # Penalize if they've played together or against each other
+                if p2 in self.player_interactions[p1]['with']:
+                    score -= 3
+                if p2 in self.player_interactions[p1]['against']:
+                    score -= 2
+        
+        return score
+
     def _generate_matches(self, active_players, court_count, matches_df):
         """Generate optimal matches based on player history"""
         try:
@@ -936,9 +989,18 @@ class SheetsManager:
             # Helper function to score player combinations
             def score_combination(players, match_type):
                 score = 0
+                current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                
+                # Get wait times for all players
+                wait_times = [self._calculate_wait_time(p, current_time) for p in players]
+                max_wait_time = max(wait_times)
+                
+                # Heavily prioritize players who have been waiting longer
+                score += max_wait_time * 3  # Increase score for players waiting longer
+                
                 # Prioritize players with fewer games
                 games_played = [player_match_counts.get(p, 0) for p in players]
-                score -= max(games_played) * 2  # Heavily penalize players with many games
+                score -= max(games_played) * 2  # Penalize players with many games
                 
                 # Check previous interactions
                 for i, p1 in enumerate(players):
