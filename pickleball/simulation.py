@@ -281,146 +281,192 @@ def run_tournament_analysis(num_players):
 
 def main():
     st.title("Pickleball Tournament Simulation Analysis")
-    st.write("Analyze tournament dynamics for different player counts")
+    st.write("Compare Standard vs Rally Scoring")
     
-    # Run simulations for player counts 20-60
+    # Run simulations for player counts 20-60 with both scoring systems
     player_counts = list(range(20, 61, 2))
-    results = []
+    standard_results = []
+    rally_results = []
     
+    # Initialize progress bars
+    progress_text = "Running simulations..."
+    progress_bar = st.progress(0, text=progress_text)
+    total_iterations = len(player_counts) * 2  # For both standard and rally scoring
+    current_iteration = 0
+    
+    # Standard scoring (15-20 min games)
     for count in player_counts:
-        result = run_tournament_analysis(count)
-        results.append({
+        simulator = TournamentSimulator(count, match_duration=17.5)  # Average of 15-20 minutes
+        simulator.run_simulation()
+        
+        # Calculate median games per player
+        games_per_player = [stats["matches"] for stats in simulator.player_stats.values()]
+        median_games = np.median(games_per_player)
+        
+        # Calculate median wait time per player
+        all_wait_times = [wait for stats in simulator.player_stats.values() for wait in stats["wait_times"]]
+        median_wait = np.median(all_wait_times) if all_wait_times else 0
+        
+        result = {
             "players": count,
-            "min": result["match_counts"]["min"],
-            "max": result["match_counts"]["max"],
-            "avg": result["match_counts"]["avg"],
-            "match_counts": result["match_counts"]["all_counts"],  # Store all match counts
-            "mens_matches": result["match_type_counts"]["mens"],
-            "womens_matches": result["match_type_counts"]["womens"],
-            "mixed_matches": result["match_type_counts"]["mixed"],
-            "avg_wait_time": result["wait_times"]["avg"],
-            "max_wait_time": result["wait_times"]["max"],
-            "mens_counts_male_min": result["mens_counts_male"]["min"],
-            "mens_counts_male_max": result["mens_counts_male"]["max"],
-            "mens_counts_male_avg": result["mens_counts_male"]["avg"],
-            "mixed_counts_male_min": result["mixed_counts_male"]["min"],
-            "mixed_counts_male_max": result["mixed_counts_male"]["max"],
-            "mixed_counts_male_avg": result["mixed_counts_male"]["avg"],
-            "womens_counts_female_min": result["womens_counts_female"]["min"],
-            "womens_counts_female_max": result["womens_counts_female"]["max"],
-            "womens_counts_female_avg": result["womens_counts_female"]["avg"],
-            "mixed_counts_female_min": result["mixed_counts_female"]["min"],
-            "mixed_counts_female_max": result["mixed_counts_female"]["max"],
-            "mixed_counts_female_avg": result["mixed_counts_female"]["avg"],
-            "wait_times": result["wait_times"]["all_times"]
-        })
+            "median_games": median_games,
+            "median_wait_time": median_wait
+        }
+        standard_results.append(result)
+        
+        # Update progress
+        current_iteration += 1
+        progress_bar.progress(current_iteration / total_iterations, 
+                            text=f"{progress_text} Standard scoring: {count} players")
     
-    df = pd.DataFrame(results)
+    # Rally scoring (10-12 min games)
+    for count in player_counts:
+        simulator = TournamentSimulator(count, match_duration=11)  # Average of 10-12 minutes
+        simulator.run_simulation()
+        
+        # Calculate median games per player
+        games_per_player = [stats["matches"] for stats in simulator.player_stats.values()]
+        median_games = np.median(games_per_player)
+        
+        # Calculate median wait time per player
+        all_wait_times = [wait for stats in simulator.player_stats.values() for wait in stats["wait_times"]]
+        median_wait = np.median(all_wait_times) if all_wait_times else 0
+        
+        result = {
+            "players": count,
+            "median_games": median_games,
+            "median_wait_time": median_wait
+        }
+        rally_results.append(result)
+        
+        # Update progress
+        current_iteration += 1
+        progress_bar.progress(current_iteration / total_iterations, 
+                            text=f"{progress_text} Rally scoring: {count} players")
     
-    # Plot match distribution
-    st.subheader("Match Count Distribution by Player Count")
+    # Clear the progress bar
+    progress_bar.empty()
     
-    # Create a list to store all match counts with their corresponding player count
-    all_match_counts = []
-    all_player_counts = []
+    standard_df = pd.DataFrame(standard_results)
+    rally_df = pd.DataFrame(rally_results)
     
-    for idx, row in df.iterrows():
-        player_count = row['players']
-        match_counts = row['match_counts']
-        all_match_counts.extend(match_counts)
-        all_player_counts.extend([player_count] * len(match_counts))
+    # Plot median games per player comparison
+    st.subheader("Median Games per Player Comparison")
+    fig = go.Figure()
     
-    match_count_df = pd.DataFrame({
-        'Player Count': all_player_counts,
-        'Number of Matches': all_match_counts
-    })
-    
-    # Create box plot
-    fig = px.box(match_count_df, x='Player Count', y='Number of Matches',
-                 title='Match Distribution per Player')
-    
-    # Calculate medians per player count
-    median_matches = match_count_df.groupby('Player Count')['Number of Matches'].median().reset_index()
-    
-    # Add line plot for medians
     fig.add_trace(
         go.Scatter(
-            x=median_matches['Player Count'],
-            y=median_matches['Number of Matches'],
+            x=standard_df['players'],
+            y=standard_df['median_games'],
             mode='lines',
-            name='Median',
-            line=dict(color='red', width=4)
+            name='Standard Scoring (17.5 min)',
+            line=dict(color='blue', width=3)
+        )
+    )
+    
+    fig.add_trace(
+        go.Scatter(
+            x=rally_df['players'],
+            y=rally_df['median_games'],
+            mode='lines',
+            name='Rally Scoring (11 min)',
+            line=dict(color='red', width=3)
         )
     )
     
     fig.update_layout(
         xaxis_title="Number of Players",
-        yaxis_title="Number of Matches",
+        yaxis_title="Median Games per Player",
         showlegend=True
     )
     st.plotly_chart(fig, use_container_width=True)
     
-    # Plot wait times
-    st.subheader("Wait Time Analysis")
+    # Plot median wait times comparison
+    st.subheader("Median Wait Time Comparison")
+    fig = go.Figure()
     
-    # Create a list to store all wait times with their corresponding player count
-    all_wait_times = []
-    all_player_counts = []
-    
-    for idx, row in df.iterrows():
-        player_count = row['players']
-        wait_times = row['wait_times']
-        all_wait_times.extend(wait_times)
-        all_player_counts.extend([player_count] * len(wait_times))
-    
-    wait_time_df = pd.DataFrame({
-        'Player Count': all_player_counts,
-        'Wait Time (minutes)': all_wait_times
-    })
-    
-    # Create box plot
-    fig = px.box(wait_time_df, x='Player Count', y='Wait Time (minutes)',
-                 title='Wait Time Distribution by Player Count')
-    
-    # Calculate medians per player count
-    median_wait_times = wait_time_df.groupby('Player Count')['Wait Time (minutes)'].median().reset_index()
-    
-    # Add line plot for medians
     fig.add_trace(
         go.Scatter(
-            x=median_wait_times['Player Count'],
-            y=median_wait_times['Wait Time (minutes)'],
+            x=standard_df['players'],
+            y=standard_df['median_wait_time'],
             mode='lines',
-            name='Median',
-            line=dict(color='red', width=4)
+            name='Standard Scoring (17.5 min)',
+            line=dict(color='blue', width=3)
+        )
+    )
+    
+    fig.add_trace(
+        go.Scatter(
+            x=rally_df['players'],
+            y=rally_df['median_wait_time'],
+            mode='lines',
+            name='Rally Scoring (11 min)',
+            line=dict(color='red', width=3)
         )
     )
     
     fig.update_layout(
         xaxis_title="Number of Players",
-        yaxis_title="Wait Time (minutes)",
+        yaxis_title="Median Wait Time (minutes)",
         showlegend=True
     )
     st.plotly_chart(fig, use_container_width=True)
-
-    # Show detailed statistics for a specific player count
-    st.subheader("Detailed Statistics for Specific Player Count")
-    selected_count = st.selectbox("Select number of players", player_counts, index=player_counts.index(30))
-    selected_stats = df[df["players"] == selected_count].iloc[0]
     
-    col1, col2, col3 = st.columns(3)
+    # Show detailed comparison for a specific player count
+    st.subheader("Detailed Comparison for Specific Player Count")
+    selected_count = st.selectbox("Select number of players", player_counts, index=player_counts.index(40))
+    
+    # Show progress for detailed stats calculation
+    detailed_progress = st.progress(0, text="Calculating detailed statistics...")
+    
+    # Standard scoring stats calculation
+    standard_stats = standard_df[standard_df["players"] == selected_count].iloc[0]
+    standard_simulator = TournamentSimulator(selected_count, match_duration=17.5)
+    standard_simulator.run_simulation()
+    detailed_progress.progress(0.25, text="Calculating standard scoring statistics...")
+    
+    # Calculate standard scoring medians
+    standard_mens_per_male = [stats["mens"] for player, stats in standard_simulator.player_stats.items() if player.startswith("M")]
+    standard_mixed_per_male = [stats["mixed"] for player, stats in standard_simulator.player_stats.items() if player.startswith("M")]
+    standard_womens_per_female = [stats["womens"] for player, stats in standard_simulator.player_stats.items() if player.startswith("F")]
+    standard_mixed_per_female = [stats["mixed"] for player, stats in standard_simulator.player_stats.items() if player.startswith("F")]
+    detailed_progress.progress(0.5, text="Calculating rally scoring statistics...")
+    
+    # Rally scoring stats calculation
+    rally_stats = rally_df[rally_df["players"] == selected_count].iloc[0]
+    rally_simulator = TournamentSimulator(selected_count, match_duration=11)
+    rally_simulator.run_simulation()
+    detailed_progress.progress(0.75, text="Processing final calculations...")
+    
+    # Calculate rally scoring medians
+    rally_mens_per_male = [stats["mens"] for player, stats in rally_simulator.player_stats.items() if player.startswith("M")]
+    rally_mixed_per_male = [stats["mixed"] for player, stats in rally_simulator.player_stats.items() if player.startswith("M")]
+    rally_womens_per_female = [stats["womens"] for player, stats in rally_simulator.player_stats.items() if player.startswith("F")]
+    rally_mixed_per_female = [stats["mixed"] for player, stats in rally_simulator.player_stats.items() if player.startswith("F")]
+    
+    # Clear the progress bar
+    detailed_progress.empty()
+    
+    # Display stats in two columns
+    col1, col2 = st.columns(2)
+    
     with col1:
-        st.metric("Average Matches per Player", f"{selected_stats['avg']:.1f}")
-        st.metric("Men's Doubles per Male", f"{selected_stats['mens_counts_male_avg']:.1f}")
-        st.metric("Mixed Doubles per Male", f"{selected_stats['mixed_counts_male_avg']:.1f}")
+        st.markdown("### Standard Scoring (17.5 min)")
+        st.metric("Median Games per Player", int(standard_stats['median_games']))
+        st.metric("Median Wait Time", f"{int(standard_stats['median_wait_time'])} min")
+        st.metric("Men's Doubles per Male", int(np.median(standard_mens_per_male)))
+        st.metric("Mixed Doubles per Male", int(np.median(standard_mixed_per_male)))
+        st.metric("Women's Doubles per Female", int(np.median(standard_womens_per_female)))
+        st.metric("Mixed Doubles per Female", int(np.median(standard_mixed_per_female)))
+    
     with col2:
-        st.metric("Min Matches", selected_stats["min"])
-        st.metric("Women's Doubles per Female", f"{selected_stats['womens_counts_female_avg']:.1f}")
-        st.metric("Mixed Doubles per Female", f"{selected_stats['mixed_counts_female_avg']:.1f}")
-    with col3:
-        st.metric("Max Matches", selected_stats["max"])
-        st.metric("Average Wait Time", f"{selected_stats['avg_wait_time']:.1f} min")
-        st.metric("Max Wait Time", f"{selected_stats['max_wait_time']:.1f} min")
+        st.markdown("### Rally Scoring (11 min)")
+        st.metric("Median Games per Player", int(rally_stats['median_games']))
+        st.metric("Median Wait Time", f"{int(rally_stats['median_wait_time'])} min")
+        st.metric("Men's Doubles per Male", int(np.median(rally_mens_per_male)))
+        st.metric("Mixed Doubles per Male", int(np.median(rally_mixed_per_male)))
+        st.metric("Women's Doubles per Female", int(np.median(rally_womens_per_female)))
+        st.metric("Mixed Doubles per Female", int(np.median(rally_mixed_per_female)))
 
 if __name__ == "__main__":
     main()
