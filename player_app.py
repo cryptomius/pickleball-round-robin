@@ -1,5 +1,5 @@
 import streamlit as st
-from pickleball.sheets_manager import SheetsManager
+from pickleball.csv_manager import CSVManager
 from pickleball import config
 import pandas as pd
 from datetime import datetime
@@ -82,7 +82,7 @@ def main():
     """, unsafe_allow_html=True)
 
     # Initialize sheets manager
-    sheets_mgr = SheetsManager()
+    sheets_mgr = CSVManager()
 
     # Get all players and sort by name
     players_df = sheets_mgr.read_sheet(config.SHEET_PLAYERS)
@@ -128,8 +128,23 @@ def main():
             games_played = player_data[config.COL_GAMES_PLAYED].iloc[0]
             
             st.write(f"Status: {status}")
-            st.write(f"Total Points: {total_points}")
-            st.write(f"Games Played: {games_played}")
+            
+            # Handle games played display
+            games_played_display = "-"
+            if not pd.isna(games_played):
+                try:
+                    games_played_display = str(int(games_played))
+                except:
+                    pass
+            st.write(f"Games Played: {games_played_display}")
+            
+            # Calculate and display average points
+            avg_points_display = "-"
+            if not pd.isna(total_points) and not pd.isna(games_played) and games_played > 0:
+                avg_points = total_points / games_played
+                avg_points_display = f"{avg_points:.4f}"
+            
+            st.write(f"Average Points per Game: {avg_points_display}")
             
             # Display player's current match and score entry
             matches_df = sheets_mgr.read_sheet(config.SHEET_MATCHES)
@@ -167,7 +182,7 @@ def main():
                 
                 st.write(f"{team_label}: {', '.join(filter(None, team_players))}")
                 st.write(f"{opponent_label}: {', '.join(filter(None, opponent_players))}")
-                st.write(f"Match Type: {match[config.COL_MATCH_TYPE]}")
+                st.write(f"Match Type: {match[config.COL_MATCH_TYPE]} Doubles")
                 
                 # Show match status
                 if match[config.COL_MATCH_STATUS] == config.STATUS_SCHEDULED:
@@ -204,7 +219,7 @@ def main():
                         court_display = f"Court {str(court_number).replace('Court ', '')}"
                     
                     st.markdown(
-                        f"**Queue Position: {match_position}** ({court_display}) - {match[config.COL_MATCH_TYPE]}  \n"
+                        f"**Queue Position: {match_position}** ({court_display}) - {match[config.COL_MATCH_TYPE]} Doubles  \n"
                         f"{match[config.COL_TEAM1_PLAYER1]} & {match[config.COL_TEAM1_PLAYER2]} vs "
                         f"{match[config.COL_TEAM2_PLAYER1]} & {match[config.COL_TEAM2_PLAYER2]}"
                     )
@@ -227,7 +242,7 @@ def main():
                     if pd.isna(court_number) or court_number == "":
                         court_display = "Court TBC"
                     else:
-                        court_display = f"Court {str(court_number).replace('Court ', '')}"
+                        court_display = f"Court {int(court_number)}"
                     
                     # Determine if the player won
                     team1_score = int(match[config.COL_TEAM1_SCORE])
@@ -237,7 +252,7 @@ def main():
                     result_emoji = "🏆" if player_won else "💪"
                     
                     st.markdown(
-                        f"**Match {match_num}** ({court_display}) - {match[config.COL_MATCH_TYPE]} {result_emoji}  \n"
+                        f"**Match {match_num}** ({court_display}) - {match[config.COL_MATCH_TYPE]} Doubles {result_emoji}  \n"
                         f"{match[config.COL_TEAM1_PLAYER1]} & {match[config.COL_TEAM1_PLAYER2]} vs "
                         f"{match[config.COL_TEAM2_PLAYER1]} & {match[config.COL_TEAM2_PLAYER2]}  \n"
                         f"Score: {team1_score} - {team2_score}"
