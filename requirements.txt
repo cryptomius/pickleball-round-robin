@@ -10,5 +10,6 @@ pytz==2023.3.post1
 qrcode==7.4.2
 Pillow==10.1.0
 plotly==5.18.0
+requests==2.31.0
 extra-streamlit-components
 -e .
