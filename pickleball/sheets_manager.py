@@ -10,9 +10,11 @@ import random
 import os
 import json
 import time
+import logging
 
 class SheetsManager:
     def __init__(self):
+        self.api_calls = 0
         try:
             # Try to get credentials from Streamlit secrets first
             if 'google_credentials_type' in st.secrets:
@@ -47,12 +49,18 @@ class SheetsManager:
             self.service = build('sheets', 'v4', credentials=self.creds)
             self.sheet = self.service.spreadsheets()
             self._last_modified = {}  # Track last modified time for each sheet
+            self._sheet_cache = {}  # Cache for sheet data
         except Exception as e:
             st.write(f"Error initializing SheetsManager: {str(e)}")
             raise
 
+    def _log_api_call(self, operation):
+        """Log API call for tracking"""
+        self.api_calls += 1
+
     def get_sheet_modified_time(self, sheet_name):
         """Get the last modified time of a sheet"""
+        self._log_api_call(f"Getting modified time for sheet {sheet_name}")
         result = self.sheet.values().get(
             spreadsheetId=config.SPREADSHEET_ID,
             range=sheet_name
@@ -69,6 +77,11 @@ class SheetsManager:
 
     def read_sheet(self, range_name):
         """Read a sheet and return as DataFrame with proper column names."""
+        cache_key = f"{range_name}_{int(time.time() / 60)}"  # Cache key changes every minute
+        if cache_key in self._sheet_cache:
+            return self._sheet_cache[cache_key]
+
+        self._log_api_call(f"Reading sheet {range_name}")
         max_retries = 3
         retry_delay = 66  # seconds
         
@@ -171,12 +184,13 @@ class SheetsManager:
                     # Create new DataFrame with expected headers and reordered data
                     df = pd.DataFrame(reordered_data, columns=expected_header)
                 
+                # Cache the result
+                self._sheet_cache[cache_key] = df
                 return df
 
             except HttpError as e:
                 if e.resp.status == 429:  # Quota exceeded error
                     if attempt < max_retries - 1:
-                        st.warning(f"Google Sheets quota exceeded. Waiting 1 minute before retry {attempt + 1}/{max_retries}...")
                         time.sleep(retry_delay)
                         continue
                 st.error(f"Error reading sheet after {max_retries} attempts: {str(e)}")
@@ -185,51 +199,14 @@ class SheetsManager:
                 st.error(f"Error reading sheet: {str(e)}")
                 return pd.DataFrame()
 
-        return pd.DataFrame()
-
-    def _verify_sheet_update(self, range_name, expected_values, max_retries=3):
-        """Verify that the sheet has been updated correctly with the expected values."""
-        try:
-            # Calculate the range based on the data size
-            if len(expected_values) > 1:  # If we have data beyond header
-                values_to_verify = expected_values[1:]  # Skip header
-                num_rows = len(values_to_verify)
-                num_cols = len(values_to_verify[0]) if values_to_verify else len(expected_values[0])
-                end_col = chr(ord('A') + num_cols - 1)
-                
-                # Read the current values including header
-                result = self.sheet.values().get(
-                    spreadsheetId=config.SPREADSHEET_ID,
-                    range=f"{range_name}!A1:{end_col}{num_rows + 1}"  # +1 for header row
-                ).execute()
-                
-                current_values = result.get('values', [])
-                
-                # Quick length check
-                if len(current_values) != len(expected_values):
-                    return False
-                
-                # Compare each row's contents, ignoring trailing empty cells
-                for curr_row, exp_row in zip(current_values, expected_values):
-                    # Trim any trailing empty cells from both rows
-                    while curr_row and curr_row[-1] == '':
-                        curr_row.pop()
-                    while exp_row and exp_row[-1] == '':
-                        exp_row.pop()
-                        
-                    if curr_row != exp_row:
-                        return False
-                
-                return True
-            
-            return True  # If no data to verify
-            
-        except Exception as e:
-            st.write(f"Error verifying sheet update: {str(e)}")
-            return False
+    def _clear_cache(self):
+        """Clear internal sheet cache"""
+        self._sheet_cache = {}
+        self._last_modified = {}
 
     def update_sheet(self, range_name, values):
         """Update a sheet with new values. Updates in-place without clearing first."""
+        self._log_api_call(f"Updating sheet {range_name}")
         if not values:
             st.write(f"Warning: Attempted to update {range_name} with empty values")
             return False
@@ -324,6 +301,8 @@ class SheetsManager:
                             body={}
                         ).execute()
                 
+                # Clear cache after successful write
+                self._clear_cache()
                 return True
 
             except Exception as e:
@@ -755,133 +734,18 @@ class SheetsManager:
     def generate_next_matches(self, active_players, court_count):
         """Generate optimal matches based on player history."""
         try:
-            # Read existing matches
+            #self.api_calls = 0  # Reset counter for this operation
+            
+            # Cache the players and matches data
+            players_df = self.read_sheet(config.SHEET_PLAYERS)
             matches_df = self.read_sheet(config.SHEET_MATCHES)
             
-            # Generate new matches
-            new_matches = self._generate_matches(active_players, court_count, matches_df)
-            
-            if not new_matches:
-                return False
-                
-            # Convert new matches to DataFrame rows
-            new_rows = []
-            for match in new_matches:
-                new_rows.append([
-                    match[config.COL_MATCH_ID],
-                    match[config.COL_COURT_NUMBER],
-                    match[config.COL_TEAM1_PLAYER1],
-                    match[config.COL_TEAM1_PLAYER2],
-                    match[config.COL_TEAM2_PLAYER1],
-                    match[config.COL_TEAM2_PLAYER2],
-                    match[config.COL_START_TIME],
-                    match[config.COL_END_TIME],
-                    match[config.COL_TEAM1_SCORE],
-                    match[config.COL_TEAM2_SCORE],
-                    config.STATUS_PENDING,  # Set initial status as pending
-                    match[config.COL_MATCH_TYPE]
-                ])
-                
-            # Append new matches to existing ones
-            all_matches = pd.concat([matches_df, pd.DataFrame(new_rows, columns=matches_df.columns)], ignore_index=True)
-            
-            # Update the matches sheet
-            self.update_sheet(config.SHEET_MATCHES, [all_matches.columns.tolist()] + all_matches.values.tolist())
-
-            # Try to assign courts to the newly added matches
-            self.assign_courts_to_pending_matches()
-            
-            return True
-            
-        except Exception as e:
-            st.error(f"Error generating matches: {str(e)}")
-            return False
-
-    def _get_player_interactions(self, matches_df):
-        """Track who has played with/against whom."""
-        interactions = {}  # {player: {'with': set(), 'against': set()}}
-        
-        for _, match in matches_df.iterrows():
-            team1 = [match[config.COL_TEAM1_PLAYER1], match[config.COL_TEAM1_PLAYER2]]
-            team2 = [match[config.COL_TEAM2_PLAYER1], match[config.COL_TEAM2_PLAYER2]]
-            all_players = team1 + team2
-            
-            # Initialize if needed
-            for player in all_players:
-                if player not in interactions:
-                    interactions[player] = {'with': set(), 'against': set()}
-            
-            # Record interactions
-            for p1 in team1:
-                interactions[p1]['with'].add(team1[1] if p1 == team1[0] else team1[0])
-                for p2 in team2:
-                    interactions[p1]['against'].add(p2)
-            
-            for p1 in team2:
-                interactions[p1]['with'].add(team2[1] if p1 == team2[0] else team2[0])
-                for p2 in team1:
-                    interactions[p1]['against'].add(p2)
-        
-        return interactions
-
-    def _calculate_wait_time(self, player, current_time):
-        """Calculate how long a player has been waiting since their last match."""
-        matches_df = self.read_sheet(config.SHEET_MATCHES)
-        player_matches = matches_df[
-            (matches_df[config.COL_TEAM1_PLAYER1] == player) |
-            (matches_df[config.COL_TEAM1_PLAYER2] == player) |
-            (matches_df[config.COL_TEAM2_PLAYER1] == player) |
-            (matches_df[config.COL_TEAM2_PLAYER2] == player)
-        ]
-        
-        if player_matches.empty:
-            return float('inf')  # Player hasn't played yet
-            
-        last_match = player_matches.iloc[-1]
-        last_match_time = last_match[config.COL_END_TIME]
-        
-        if pd.isna(last_match_time) or last_match_time == "":
-            return float('inf')
-            
-        try:
-            last_match_dt = datetime.strptime(last_match_time, "%Y-%m-%d %H:%M:%S")
-            current_dt = datetime.strptime(current_time, "%Y-%m-%d %H:%M:%S")
-            wait_time = (current_dt - last_match_dt).total_seconds() / 60  # Convert to minutes
-            return wait_time
-        except:
-            return float('inf')
-
-    def score_combination(self, players, match_type):
-        score = 0
-        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
-        # Get wait times for all players
-        wait_times = [self._calculate_wait_time(p, current_time) for p in players]
-        max_wait_time = max(wait_times)
-        
-        # Heavily prioritize players who have been waiting longer
-        score += max_wait_time * 3  # Increase score for players waiting longer
-        
-        # Prioritize players with fewer games
-        games_played = [self.player_match_counts.get(p, 0) for p in players]
-        score -= max(games_played) * 2  # Penalize players with many games
-        
-        # Check previous interactions
-        for i, p1 in enumerate(players):
-            for p2 in players[i+1:]:
-                # Penalize if they've played together or against each other
-                if p2 in self.player_interactions[p1]['with']:
-                    score -= 3
-                if p2 in self.player_interactions[p1]['against']:
-                    score -= 2
-        
-        return score
-
-    def _generate_matches(self, active_players, court_count, matches_df):
-        """Generate optimal matches based on player history"""
-        try:
-            # Get player genders from players sheet
-            players_df = self.read_sheet(config.SHEET_PLAYERS)
+            # Pre-calculate wait times for all players using cached matches_df
+            current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            player_wait_times = {
+                player: self._calculate_wait_time(player, current_time, matches_df)
+                for player in active_players
+            }
             
             # Filter out any players that are not marked as Active in the sheet
             active_status_players = set(players_df[players_df[config.COL_STATUS] == "Active"][config.COL_NAME])
@@ -893,119 +757,32 @@ class SheetsManager:
             male_players = [p for p in active_players if player_genders.get(p) == config.GENDER_MALE]
             female_players = [p for p in active_players if player_genders.get(p) == config.GENDER_FEMALE]
             
-            # Debug information
-            st.write(f"Male players: {len(male_players)}")
-            st.write(f"Female players: {len(female_players)}")
-            
-            # Calculate match type ratios for each gender from match history
-            male_match_counts = {"mens": 0, "mixed": 0}
-            female_match_counts = {"womens": 0, "mixed": 0}
-            
-            for _, match in matches_df.iterrows():
-                match_type = match[config.COL_MATCH_TYPE]
-                players = [
-                    match[config.COL_TEAM1_PLAYER1],
-                    match[config.COL_TEAM1_PLAYER2],
-                    match[config.COL_TEAM2_PLAYER1],
-                    match[config.COL_TEAM2_PLAYER2]
-                ]
-                
-                if match_type == "Mixed":
-                    for player in players:
-                        if pd.notna(player):
-                            if player_genders.get(player) == config.GENDER_MALE:
-                                male_match_counts["mixed"] += 1
-                            elif player_genders.get(player) == config.GENDER_FEMALE:
-                                female_match_counts["mixed"] += 1
-                elif match_type == "Mens":
-                    for player in players:
-                        if pd.notna(player):
-                            male_match_counts["mens"] += 1
-                elif match_type == "Womens":
-                    for player in players:
-                        if pd.notna(player):
-                            female_match_counts["womens"] += 1
-            
-            # Calculate ratios
-            male_ratio = 0
-            total_male_matches = male_match_counts["mens"] + male_match_counts["mixed"]
-            if total_male_matches > 0:
-                male_ratio = male_match_counts["mixed"] / total_male_matches
-                
-            female_ratio = 0
-            total_female_matches = female_match_counts["womens"] + female_match_counts["mixed"]
-            if total_female_matches > 0:
-                female_ratio = female_match_counts["mixed"] / total_female_matches
-            
-            # Calculate dynamic distribution based on available players and match history
-            total_players = len(male_players) + len(female_players)
-            available_pairs = min(len(male_players), len(female_players))
-            
-            # Adjust match type distribution based on current ratios
-            total_matches = min(court_count, len(active_players) // 4)
-            
-            # Prioritize match types to balance ratios
-            match_types = []
-            if male_ratio > 0.5 and len(male_players) >= 4:
-                match_types.append("Mens")
-            if female_ratio > 0.5 and len(female_players) >= 4:
-                match_types.append("Womens")
-            if (male_ratio < 0.5 or female_ratio < 0.5) and len(male_players) >= 2 and len(female_players) >= 2:
-                match_types.append("Mixed")
-                
-            # If no preferred types available, fall back to all possible types
-            if not match_types:
-                if len(male_players) >= 4:
-                    match_types.append("Mens")
-                if len(female_players) >= 4:
-                    match_types.append("Womens")
-                if len(male_players) >= 2 and len(female_players) >= 2:
-                    match_types.append("Mixed")
-            
-            # Get match history and interactions
-            player_match_counts = self._get_player_match_counts(matches_df, active_players)
+            # Pre-calculate all player interactions using cached matches_df
             player_interactions = self._get_player_interactions(matches_df)
-            
-            # Initialize if not in interactions
             for player in active_players:
                 if player not in player_interactions:
                     player_interactions[player] = {'with': set(), 'against': set()}
             
-            new_matches = []
-            match_id_counter = self._get_next_match_id(matches_df)
+            # Pre-calculate match counts using cached matches_df
+            player_match_counts = self._get_player_match_counts(active_players, matches_df)
             
-            # Determine match generation order based on last match type
-            last_match = matches_df.iloc[-1] if not matches_df.empty else None
-            last_type = last_match[config.COL_MATCH_TYPE] if last_match is not None else None
-            
-            match_types = []
-            if last_type == "Mixed":
-                match_types = ["Mens", "Womens", "Mixed"]
-            elif last_type == "Mens":
-                match_types = ["Womens", "Mixed", "Mens"]
-            else:
-                match_types = ["Mixed", "Mens", "Womens"]
-            
-            # Helper function to score player combinations
             def score_combination(players, match_type):
                 score = 0
-                current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 
-                # Get wait times for all players
-                wait_times = [self._calculate_wait_time(p, current_time) for p in players]
+                # Use pre-calculated wait times
+                wait_times = [player_wait_times[p] for p in players]
                 max_wait_time = max(wait_times)
                 
                 # Heavily prioritize players who have been waiting longer
-                score += max_wait_time * 3  # Increase score for players waiting longer
+                score += max_wait_time * 3
                 
-                # Prioritize players with fewer games
+                # Use pre-calculated match counts
                 games_played = [player_match_counts.get(p, 0) for p in players]
-                score -= max(games_played) * 2  # Penalize players with many games
+                score -= max(games_played) * 2
                 
-                # Check previous interactions
+                # Use pre-calculated interactions
                 for i, p1 in enumerate(players):
                     for p2 in players[i+1:]:
-                        # Penalize if they've played together or against each other
                         if p2 in player_interactions[p1]['with']:
                             score -= 3
                         if p2 in player_interactions[p1]['against']:
@@ -1035,6 +812,22 @@ class SheetsManager:
                 
                 return list(best_combination) if best_combination else None
             
+            # Generate matches
+            new_matches = []
+            match_id_counter = self._get_next_match_id()
+            
+            # Determine match generation order based on last match type
+            last_match = self.read_sheet(config.SHEET_MATCHES).iloc[-1] if not self.read_sheet(config.SHEET_MATCHES).empty else None
+            last_type = last_match[config.COL_MATCH_TYPE] if last_match is not None else None
+            
+            match_types = []
+            if last_type == "Mixed":
+                match_types = ["Mens", "Womens", "Mixed"]
+            elif last_type == "Mens":
+                match_types = ["Womens", "Mixed", "Mens"]
+            else:
+                match_types = ["Mixed", "Mens", "Womens"]
+            
             # Generate matches in determined order
             for match_type in match_types:
                 count = 1
@@ -1055,7 +848,8 @@ class SheetsManager:
                                     config.COL_END_TIME: "",
                                     config.COL_TEAM1_SCORE: "",
                                     config.COL_TEAM2_SCORE: "",
-                                    config.COL_MATCH_TYPE: "Mixed"
+                                    config.COL_MATCH_TYPE: "Mixed",
+                                    config.COL_MATCH_STATUS: config.STATUS_PENDING
                                 }
                                 new_matches.append(match)
                                 match_id_counter += 1
@@ -1080,7 +874,8 @@ class SheetsManager:
                                 config.COL_END_TIME: "",
                                 config.COL_TEAM1_SCORE: "",
                                 config.COL_TEAM2_SCORE: "",
-                                config.COL_MATCH_TYPE: "Mens"
+                                config.COL_MATCH_TYPE: "Mens",
+                                config.COL_MATCH_STATUS: config.STATUS_PENDING
                             }
                             new_matches.append(match)
                             match_id_counter += 1
@@ -1104,7 +899,8 @@ class SheetsManager:
                                 config.COL_END_TIME: "",
                                 config.COL_TEAM1_SCORE: "",
                                 config.COL_TEAM2_SCORE: "",
-                                config.COL_MATCH_TYPE: "Womens"
+                                config.COL_MATCH_TYPE: "Womens",
+                                config.COL_MATCH_STATUS: config.STATUS_PENDING
                             }
                             new_matches.append(match)
                             match_id_counter += 1
@@ -1114,11 +910,137 @@ class SheetsManager:
                                 player_match_counts[player] = player_match_counts.get(player, 0) + 1
                             female_players = [p for p in female_players if p not in players]
             
-            return new_matches if new_matches else None
+            # Convert new matches to DataFrame rows
+            new_rows = []
+            for match in new_matches:
+                new_rows.append([
+                    match[config.COL_MATCH_ID],
+                    match[config.COL_COURT_NUMBER],
+                    match[config.COL_TEAM1_PLAYER1],
+                    match[config.COL_TEAM1_PLAYER2],
+                    match[config.COL_TEAM2_PLAYER1],
+                    match[config.COL_TEAM2_PLAYER2],
+                    match[config.COL_START_TIME],
+                    match[config.COL_END_TIME],
+                    match[config.COL_TEAM1_SCORE],
+                    match[config.COL_TEAM2_SCORE],
+                    match[config.COL_MATCH_STATUS],
+                    match[config.COL_MATCH_TYPE]
+                ])
+                
+            # Append new matches to existing ones
+            all_matches = pd.concat([self.read_sheet(config.SHEET_MATCHES), pd.DataFrame(new_rows, columns=self.read_sheet(config.SHEET_MATCHES).columns)], ignore_index=True)
+            
+            # Update the matches sheet
+            self.update_sheet(config.SHEET_MATCHES, [all_matches.columns.tolist()] + all_matches.values.tolist())
+            
+            # Clear cache after successful write
+            self._clear_cache()
+            
+            # Try to assign courts to the newly added matches
+            self.assign_courts_to_pending_matches()
+            
+            #st.write(f"Match generation completed. API calls so far: {self.api_calls}")
+            
+            return True
             
         except Exception as e:
             st.error(f"Error generating matches: {str(e)}")
-            return None
+            return False
+
+    def _get_player_interactions(self, matches_df=None):
+        """Track who has played with/against whom."""
+        if matches_df is None:
+            matches_df = self.read_sheet(config.SHEET_MATCHES)
+        
+        interactions = {}
+        
+        for _, match in matches_df.iterrows():
+            team1_players = [match[config.COL_TEAM1_PLAYER1], match[config.COL_TEAM1_PLAYER2]]
+            team2_players = [match[config.COL_TEAM2_PLAYER1], match[config.COL_TEAM2_PLAYER2]]
+            
+            # Initialize player records if not exists
+            for player in team1_players + team2_players:
+                if pd.notna(player) and player not in interactions:
+                    interactions[player] = {'with': set(), 'against': set()}
+            
+            # Record team1 interactions
+            for i, p1 in enumerate(team1_players):
+                if pd.notna(p1):
+                    # Played with teammates
+                    for p2 in team1_players[i+1:]:
+                        if pd.notna(p2):
+                            interactions[p1]['with'].add(p2)
+                            interactions[p2]['with'].add(p1)
+                    
+                    # Played against opponents
+                    for p2 in team2_players:
+                        if pd.notna(p2):
+                            interactions[p1]['against'].add(p2)
+                            interactions[p2]['against'].add(p1)
+            
+            # Record team2 interactions
+            for i, p1 in enumerate(team2_players):
+                if pd.notna(p1):
+                    for p2 in team2_players[i+1:]:
+                        if pd.notna(p2):
+                            interactions[p1]['with'].add(p2)
+                            interactions[p2]['with'].add(p1)
+        
+        return interactions
+
+    def _calculate_wait_time(self, player, current_time, matches_df=None):
+        """Calculate how long a player has been waiting since their last match."""
+        if matches_df is None:
+            matches_df = self.read_sheet(config.SHEET_MATCHES)
+        
+        # Get player's matches
+        player_matches = matches_df[
+            (matches_df[config.COL_TEAM1_PLAYER1] == player) |
+            (matches_df[config.COL_TEAM1_PLAYER2] == player) |
+            (matches_df[config.COL_TEAM2_PLAYER1] == player) |
+            (matches_df[config.COL_TEAM2_PLAYER2] == player)
+        ]
+        
+        if player_matches.empty:
+            return float('inf')  # Player hasn't played any matches
+        
+        # Get the most recent match
+        last_match = player_matches.iloc[-1]
+        last_match_time = last_match[config.COL_END_TIME] if pd.notna(last_match[config.COL_END_TIME]) else last_match[config.COL_START_TIME]
+        
+        if pd.isna(last_match_time) or last_match_time == '':
+            return float('inf')
+        
+        # Calculate time difference
+        last_match_dt = datetime.strptime(last_match_time, "%Y-%m-%d %H:%M:%S")
+        current_dt = datetime.strptime(current_time, "%Y-%m-%d %H:%M:%S")
+        wait_time = (current_dt - last_match_dt).total_seconds() / 60  # Convert to minutes
+        
+        return wait_time
+
+    def _get_player_match_counts(self, active_players, matches_df=None):
+        """Get the number of matches played by each player"""
+        if matches_df is None:
+            matches_df = self.read_sheet(config.SHEET_MATCHES)
+        
+        match_counts = {}
+        for player in active_players:
+            matches = matches_df[
+                (matches_df[config.COL_TEAM1_PLAYER1] == player) |
+                (matches_df[config.COL_TEAM1_PLAYER2] == player) |
+                (matches_df[config.COL_TEAM2_PLAYER1] == player) |
+                (matches_df[config.COL_TEAM2_PLAYER2] == player)
+            ]
+            match_counts[player] = len(matches)
+        
+        return match_counts
+
+    def _get_next_match_id(self):
+        """Get the next available match ID"""
+        match_id_pattern = r'M(\d+)'
+        existing_match_ids = self.read_sheet(config.SHEET_MATCHES)[config.COL_MATCH_ID].str.extract(match_id_pattern, expand=False).astype(float)
+        return int(existing_match_ids.max() + 1) if not existing_match_ids.empty else 1
 
     def cancel_match(self, match_id):
         """Cancel a match and assign next pending match if court is available."""
@@ -1233,19 +1155,3 @@ class SheetsManager:
         except Exception as e:
             st.error(f"Error migrating gender values: {str(e)}")
             return False
-
-    def _get_player_match_counts(self, matches_df, active_players):
-        """Get the number of matches played by each player"""
-        player_match_counts = {}
-        for _, match in matches_df.iterrows():
-            for player in [match[config.COL_TEAM1_PLAYER1], match[config.COL_TEAM1_PLAYER2],
-                         match[config.COL_TEAM2_PLAYER1], match[config.COL_TEAM2_PLAYER2]]:
-                if player in active_players:
-                    player_match_counts[player] = player_match_counts.get(player, 0) + 1
-        return player_match_counts
-
-    def _get_next_match_id(self, matches_df):
-        """Get the next available match ID"""
-        match_id_pattern = r'M(\d+)'
-        existing_match_ids = matches_df[config.COL_MATCH_ID].str.extract(match_id_pattern, expand=False).astype(float)
-        return int(existing_match_ids.max() + 1) if not existing_match_ids.empty else 1
