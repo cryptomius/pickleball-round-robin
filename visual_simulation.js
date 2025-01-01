@@ -13,6 +13,7 @@ class PickleballSimulation {
         this.isRunning = false;
         this.matchDuration = 17.5; // Default to standard scoring (17.5 minutes)
         this.totalDuration = 360; // 6 hours in minutes
+        this.simulationTimer = null; // Add timer reference
         
         // Set up the court layout
         this.setupCourts();
@@ -75,11 +76,21 @@ class PickleballSimulation {
         d3.select('#pauseSimulation').on('click', () => this.pause());
         d3.select('#resetSimulation').on('click', () => this.reset());
         
-        // Set standard scoring as default
+        // Add player count change listener with clean reset
+        d3.select('#playerCount').on('change', () => {
+            this.reset();
+            this.start();
+        });
+        
+        // Set standard scoring as default and add change listener
         const scoringSelect = d3.select('#scoringSystem');
         scoringSelect.node().value = 'standard';
+        this.matchDuration = 17.5; // Set initial duration to standard scoring
+        
         scoringSelect.on('change', () => {
             this.matchDuration = scoringSelect.node().value === 'rally' ? 11 : 17.5;
+            this.reset();
+            this.start();
         });
     }
 
@@ -449,28 +460,75 @@ class PickleballSimulation {
     start() {
         if (!this.isRunning) {
             this.isRunning = true;
-            this.simulationLoop();
+            if (this.simulationTimer) {
+                clearTimeout(this.simulationTimer);
+                this.simulationTimer = null;
+            }
+            // Generate initial matches after a short delay to show the initial state
+            setTimeout(() => {
+                this.generateMatch();
+                this.updateSimulation();
+                this.simulationLoop();
+            }, 1000);
         }
     }
 
     pause() {
         this.isRunning = false;
+        if (this.simulationTimer) {
+            clearTimeout(this.simulationTimer);
+            this.simulationTimer = null;
+        }
     }
 
     reset() {
+        // Stop any running simulation and clear timer
         this.isRunning = false;
+        if (this.simulationTimer) {
+            clearTimeout(this.simulationTimer);
+            this.simulationTimer = null;
+        }
+        
+        // Clear all timers and state
         this.timeElapsed = 0;
         this.matches = [];
         this.pendingMatches = [];
+        
+        // Clear all court assignments
         this.courts.forEach(court => court.players = []);
-        document.getElementById('timeSlider').noUiSlider.set(0);
+        
+        // Clear all D3 elements
+        this.svg.selectAll('.player').remove();
+        this.svg.selectAll('.wait-time').remove();
+        
+        // Reset the slider
+        const slider = document.getElementById('timeSlider');
+        if (slider && slider.noUiSlider) {
+            slider.noUiSlider.set(0);
+        }
+        
+        // Clear stats
+        const stats = document.getElementById('currentStats');
+        if (stats) {
+            stats.innerHTML = '';
+        }
+        
+        // Initialize new players
+        this.players = [];
         this.initializePlayers();
+        
+        // Update the visualization with all players in waiting area
+        this.positionWaitingPlayers(true);
         this.updateSimulation();
     }
 
     simulationLoop() {
         if (!this.isRunning || this.timeElapsed >= this.totalDuration) {
             this.isRunning = false;
+            if (this.simulationTimer) {
+                clearTimeout(this.simulationTimer);
+                this.simulationTimer = null;
+            }
             return;
         }
 
@@ -478,7 +536,7 @@ class PickleballSimulation {
         this.updateWaitTimes();
         this.updateSimulation();
 
-        setTimeout(() => this.simulationLoop(), 1000); // 1 second = 1 minute in simulation
+        this.simulationTimer = setTimeout(() => this.simulationLoop(), 1000); // Store timer reference
     }
 }
 
@@ -486,5 +544,4 @@ class PickleballSimulation {
 window.addEventListener('load', () => {
     const simulation = new PickleballSimulation();
     simulation.reset();
-    simulation.start(); // Auto-start the simulation
 });
