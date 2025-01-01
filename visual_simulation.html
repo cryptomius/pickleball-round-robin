@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Pickleball Tournament Visual Simulation</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .controls {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+        }
+        canvas {
+            border: 1px solid #ccc;
+            background: #fff;
+        }
+        .slider-container {
+            flex-grow: 1;
+        }
+        input[type="range"] {
+            width: 100%;
+        }
+        .time-display {
+            min-width: 100px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Pickleball Tournament Visual Simulation</h1>
+        <div class="controls">
+            <label>
+                Players:
+                <select id="playerCount">
+                    <option value="20">20</option>
+                    <option value="22">22</option>
+                    <option value="24">24</option>
+                    <option value="26">26</option>
+                    <option value="28">28</option>
+                    <option value="30">30</option>
+                    <option value="32">32</option>
+                    <option value="34">34</option>
+                    <option value="36">36</option>
+                    <option value="38" selected>38</option>
+                    <option value="40">40</option>
+                    <option value="42">42</option>
+                    <option value="44">44</option>
+                    <option value="46">46</option>
+                    <option value="48">48</option>
+                    <option value="50">50</option>
+                    <option value="52">52</option>
+                    <option value="54">54</option>
+                    <option value="56">56</option>
+                    <option value="58">58</option>
+                    <option value="60">60</option>
+                </select>
+            </label>
+            <label>
+                <input type="radio" name="scoring" value="standard" checked> Standard Scoring (17.5 min)
+            </label>
+            <label>
+                <input type="radio" name="scoring" value="rally"> Rally Scoring (11 min)
+            </label>
+            <button id="startBtn">Start Simulation</button>
+        </div>
+        <div class="controls">
+            <button id="playPauseBtn">Play/Pause</button>
+            <div class="slider-container">
+                <input type="range" id="timeSlider" min="0" max="360" value="0">
+            </div>
+            <div class="time-display">
+                Time: <span id="timeDisplay">0:00</span>
+            </div>
+        </div>
+        <canvas id="simulationCanvas"></canvas>
+    </div>
+    <script src="visual_simulation.js"></script>
+</body>
+</html>
