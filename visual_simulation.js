@@ -1,1161 +1,490 @@
-// Matter.js module aliases
-const { Engine, World, Bodies, Body, Runner } = Matter;
-
-// Constants
-const PLAYER_RADIUS = 15;
-const COURT_WIDTH = 200;
-const COURT_HEIGHT = 150;
-const COURT_SPACING = 50;
-const THOROUGHFARE_HEIGHT = 100;
-const CANVAS_WIDTH = 1200;
-const CANVAS_HEIGHT = 800;
-const WAITING_AREA_WIDTH = CANVAS_WIDTH * 0.3;
-const NUM_COURTS = 6;
-const TOTAL_PLAYERS = 38;
-
-// Add debug constants
-const TOP_THOROUGHFARE_Y = THOROUGHFARE_HEIGHT;
-const BOTTOM_THOROUGHFARE_Y = CANVAS_HEIGHT - THOROUGHFARE_HEIGHT;
-const COURT_START_Y = THOROUGHFARE_HEIGHT * 2; // Start courts after top thoroughfare
-
-// Matter.js setup
-let engine = null;
-let runner = null;
-
-// Initialize Matter.js engine
-function initEngine() {
-    if (engine) {
-        Matter.World.clear(engine.world);
-        Matter.Engine.clear(engine);
+class PickleballSimulation {
+    constructor() {
+        this.svg = d3.select('#courtLayout');
+        this.width = 1000;
+        this.height = 600;
+        this.svg.attr('width', this.width).attr('height', this.height);
+        
+        this.players = [];
+        this.courts = [];
+        this.matches = [];
+        this.pendingMatches = []; // Track matches waiting for courts
+        this.timeElapsed = 0;
+        this.isRunning = false;
+        this.matchDuration = 17.5; // Default to standard scoring (17.5 minutes)
+        this.totalDuration = 360; // 6 hours in minutes
+        
+        // Set up the court layout
+        this.setupCourts();
+        this.setupControls();
+        this.setupTimeSlider();
     }
-    
-    engine = Engine.create({
-        enableSleeping: false,
-        constraintIterations: 4,
-        velocityIterations: 8,
-        positionIterations: 6
-    });
-    
-    engine.world.gravity.y = 0;
-    
-    if (runner) {
-        Matter.Runner.stop(runner);
+
+    setupCourts() {
+        // Waiting area on the left
+        this.svg.append('rect')
+            .attr('class', 'waiting-area')
+            .attr('x', 50)
+            .attr('y', 50)
+            .attr('width', 300)
+            .attr('height', 500);
+
+        // 6 courts on the right (3x2 grid)
+        const courtWidth = 180;
+        const courtHeight = 240;
+        const startX = 400;
+        const startY = 50;
+        const padding = 20;
+
+        for (let row = 0; row < 2; row++) {
+            for (let col = 0; col < 3; col++) {
+                const x = startX + col * (courtWidth + padding);
+                const y = startY + row * (courtHeight + padding);
+                
+                this.courts.push({
+                    id: row * 3 + col,
+                    x, y,
+                    width: courtWidth,
+                    height: courtHeight,
+                    players: []
+                });
+
+                // Draw court rectangle
+                this.svg.append('rect')
+                    .attr('class', 'court')
+                    .attr('x', x)
+                    .attr('y', y)
+                    .attr('width', courtWidth)
+                    .attr('height', courtHeight);
+
+                // Draw net (black horizontal line in the middle)
+                this.svg.append('line')
+                    .attr('class', 'net')
+                    .attr('x1', x)
+                    .attr('y1', y + courtHeight/2)
+                    .attr('x2', x + courtWidth)
+                    .attr('y2', y + courtHeight/2)
+                    .attr('stroke', 'black')
+                    .attr('stroke-width', 2);
+            }
+        }
     }
-    
-    runner = Runner.create({
-        isFixed: true,
-        delta: 1000 / 60
-    });
-    
-    logDebugInfo('Engine Initialized', {
-        engine: {
-            world: engine.world !== null,
-            gravity: engine.world.gravity,
-            timing: engine.timing
-        },
-        runner: {
-            isFixed: runner.isFixed,
-            delta: runner.delta
-        }
-    });
-    
-    return engine;
-}
 
-// Debug info
-let debugInfo = {
-    playerStates: {},
-    courtInfo: [],
-    waitingPlayers: 0,
-    thoroughfarePositions: [],
-    errors: [],
-    courtAssignments: []
-};
-
-function logDebugInfo(message, data) {
-    console.log(`[DEBUG] ${message}:`, JSON.stringify(data, null, 2));
-}
-
-// Canvas setup
-const canvas = document.getElementById('simulationCanvas');
-const ctx = canvas.getContext('2d');
-
-// Set canvas size
-canvas.width = CANVAS_WIDTH;
-canvas.height = CANVAS_HEIGHT;
-
-// Global variables
-let players = [];
-let courts = [];
-let matches = [];
-let currentTime = 0;
-let isPlaying = false;
-let simulationSpeed = 1000; // 1 second = 1 minute
-let matchDuration = 17.5; // minutes
-let changeover = 5; // minutes
-let gameLoopStarted = false;
-
-class Player {
-    constructor(id, gender) {
-        this.id = id;
-        this.gender = gender;
-        this.gridPosition = null;
-        this.state = 'waiting';
-        this.targetX = null;
-        this.targetY = null;
-        this.currentCourt = null;
-        this.courtPosition = null;
-        this.movementQueue = null;
-        this.matchStartTime = null;
-        this.lastError = null;
-        this.waypoints = null;
-        this.moveDelay = Math.random() * 0.5; // Random delay up to 0.5 seconds
-        this.speed = 1.5 + Math.random() * 1.5; // Random speed between 1.5 and 3
+    setupControls() {
+        d3.select('#startSimulation').on('click', () => this.start());
+        d3.select('#pauseSimulation').on('click', () => this.pause());
+        d3.select('#resetSimulation').on('click', () => this.reset());
         
-        // Create physics body
-        this.body = Bodies.circle(0, 0, PLAYER_RADIUS, {
-            friction: 0.001,
-            frictionAir: 0.001,
-            restitution: 0.1,
-            inertia: Infinity,
-            density: 0.001,
-            isStatic: false,
-            label: `player_${id}`
-        });
-        
-        if (engine && engine.world) {
-            World.add(engine.world, this.body);
-        }
-        
-        // Log player creation
-        logDebugInfo(`Created Player ${id}`, {
-            gender,
-            initialState: this.state,
-            position: this.body.position
+        // Set standard scoring as default
+        const scoringSelect = d3.select('#scoringSystem');
+        scoringSelect.node().value = 'standard';
+        scoringSelect.on('change', () => {
+            this.matchDuration = scoringSelect.node().value === 'rally' ? 11 : 17.5;
         });
     }
-    
-    getDebugInfo() {
-        return {
-            id: this.id,
-            state: this.state,
-            position: this.body.position,
-            target: this.targetX !== null ? { x: this.targetX, y: this.targetY } : null,
-            currentCourt: this.currentCourt ? this.currentCourt.index + 1 : null,
-            movementQueue: this.movementQueue,
-            lastError: this.lastError
-        };
+
+    setupTimeSlider() {
+        const slider = document.getElementById('timeSlider');
+        noUiSlider.create(slider, {
+            start: 0,
+            connect: true,
+            range: {
+                'min': 0,
+                'max': this.totalDuration
+            }
+        });
+
+        slider.noUiSlider.on('update', (values) => {
+            if (!this.isRunning) {
+                this.timeElapsed = parseInt(values[0]);
+                this.updateSimulation();
+            }
+        });
     }
 
-    remove() {
-        if (this.body && engine && engine.world) {
-            World.remove(engine.world, this.body);
-        }
-    }
-
-    assignGridPosition() {
-        // Get current waiting players
-        const waitingPlayers = players
-            .filter(p => p.state === 'waiting' || p.state === 'returning')
-            .sort((a, b) => a.id - b.id);
+    initializePlayers() {
+        const playerCount = parseInt(d3.select('#playerCount').node().value);
+        const maleCount = Math.floor(playerCount / 2);
+        const femaleCount = playerCount - maleCount;
         
-        // Find this player's position in the waiting list
-        const index = waitingPlayers.findIndex(p => p.id === this.id);
-        if (index === -1) return;
+        this.players = [];
         
-        // Calculate grid position
-        const GRID_COLS = 6;
-        const SPACING = PLAYER_RADIUS * 3;
-        const col = index % GRID_COLS;
-        const row = Math.floor(index / GRID_COLS);
-        
-        // Calculate actual coordinates
-        this.gridPosition = {
-            x: PLAYER_RADIUS * 2 + col * SPACING,
-            y: PLAYER_RADIUS * 2 + row * SPACING
-        };
-    }
-
-    returnToWaitingArea() {
-        // Don't return if already returning or waiting
-        if (this.state === 'returning' || this.state === 'waiting') return;
-        
-        this.state = 'returning';
-        this.currentCourt = null;
-        this.courtPosition = null;
-        
-        // Calculate thoroughfare path
-        const currentY = this.body.position.y;
-        const thoroughfareY = currentY < CANVAS_HEIGHT / 2 ? 
-            THOROUGHFARE_HEIGHT : CANVAS_HEIGHT - THOROUGHFARE_HEIGHT;
-        
-        // Set up movement queue
-        this.movementQueue = [
-            { x: this.body.position.x, y: thoroughfareY }, // First move vertically to thoroughfare
-            { x: WAITING_AREA_WIDTH + 30, y: thoroughfareY }, // Then move along thoroughfare
-            null // Final position will be set when previous movements complete
-        ];
-        
-        // Start first movement
-        this.startNextMovement();
-    }
-
-    startNextMovement() {
-        if (!this.movementQueue || this.movementQueue.length === 0) return;
-        
-        const nextPos = this.movementQueue[0];
-        if (nextPos === null) {
-            // Time to calculate grid position
-            this.assignGridPosition();
-            this.movementQueue[0] = this.gridPosition;
+        // Create male players (blue)
+        for (let i = 0; i < maleCount; i++) {
+            this.players.push({
+                id: i + 1,
+                gender: 'M',
+                waitTime: 0,
+                inMatch: false,
+                gamesPlayed: 0,
+                x: 0,
+                y: 0,
+                originalX: 0,  // Store original position
+                originalY: 0
+            });
         }
         
-        this.moveTo(this.movementQueue[0].x, this.movementQueue[0].y);
+        // Create female players (pink)
+        for (let i = 0; i < femaleCount; i++) {
+            this.players.push({
+                id: maleCount + i + 1,
+                gender: 'F',
+                waitTime: 0,
+                inMatch: false,
+                gamesPlayed: 0,
+                x: 0,
+                y: 0,
+                originalX: 0,  // Store original position
+                originalY: 0
+            });
+        }
+
+        this.positionWaitingPlayers(true);  // true indicates initial positioning
     }
 
-    moveTo(x, y) {
-        this.targetX = x;
-        this.targetY = y;
-    }
+    positionWaitingPlayers(isInitial = false) {
+        const waitingPlayers = this.players.filter(p => !p.inMatch);
+        const cols = 6;
+        const spacing = 40;
+        const startX = 80;
+        const startY = 80;
 
-    update() {
-        if (this.targetX !== null && this.targetY !== null) {
-            const dx = this.targetX - this.body.position.x;
-            const dy = this.targetY - this.body.position.y;
-            const distance = Math.sqrt(dx * dx + dy * dy);
+        waitingPlayers.forEach((player, i) => {
+            const row = Math.floor(i / cols);
+            const col = i % cols;
+            const newX = startX + col * spacing;
+            const newY = startY + row * spacing;
             
-            if (distance > 1) {
-                const speed = 3;
-                const vx = (dx / distance) * speed;
-                const vy = (dy / distance) * speed;
-                Body.setVelocity(this.body, { x: vx, y: vy });
+            if (isInitial) {
+                // Store original position during initialization
+                player.originalX = newX;
+                player.originalY = newY;
+                player.x = newX;
+                player.y = newY;
             } else {
-                Body.setVelocity(this.body, { x: 0, y: 0 });
-                
-                // Handle movement queue
-                if (this.movementQueue && this.movementQueue.length > 0) {
-                    this.movementQueue.shift();
-                    if (this.movementQueue.length > 0) {
-                        this.startNextMovement();
-                    } else {
-                        // Movement complete
-                        if (this.state === 'returning') {
-                            this.state = 'waiting';
-                        } else if (this.state === 'moving_to_court') {
-                            this.state = 'playing';
-                            this.matchStartTime = currentTime;
-                        }
-                        this.targetX = null;
-                        this.targetY = null;
-                    }
-                } else {
-                    this.targetX = null;
-                    this.targetY = null;
-                }
+                // Return to original position when coming back to waiting area
+                player.x = player.originalX;
+                player.y = player.originalY;
             }
-        }
-        
-        // Maintain grid position if waiting
-        if (this.state === 'waiting') {
-            this.assignGridPosition();
-            if (this.gridPosition) {
-                const dx = this.gridPosition.x - this.body.position.x;
-                const dy = this.gridPosition.y - this.body.position.y;
-                const distance = Math.sqrt(dx * dx + dy * dy);
-                
-                if (distance > 1) {
-                    const speed = 2;
-                    const vx = (dx / distance) * speed;
-                    const vy = (dy / distance) * speed;
-                    Body.setVelocity(this.body, { x: vx, y: vy });
-                }
-            }
-        }
-    }
-
-    draw() {
-        const pos = this.body.position;
-        
-        // Draw player circle
-        ctx.beginPath();
-        ctx.arc(pos.x, pos.y, PLAYER_RADIUS, 0, Math.PI * 2);
-        ctx.fillStyle = this.gender === 'M' ? '#4444FF' : '#FF44FF';
-        ctx.fill();
-        ctx.strokeStyle = '#000';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-
-        // Draw player number
-        ctx.fillStyle = '#FFF';
-        ctx.font = '12px Arial';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(this.id.substring(1), pos.x, pos.y);
-    }
-}
-
-class Court {
-    constructor(index) {
-        this.index = index;
-        this.x = WAITING_AREA_WIDTH + COURT_SPACING + (COURT_WIDTH + COURT_SPACING) * (index % 3);
-        this.y = COURT_START_Y + Math.floor(index / 3) * (COURT_HEIGHT + COURT_SPACING * 2);
-        this.width = COURT_WIDTH;
-        this.height = COURT_HEIGHT;
-        this.currentMatch = null;
-        this.positions = [
-            {x: this.x + this.width * 0.25, y: this.y + this.height * 0.25},  // Top left
-            {x: this.x + this.width * 0.25, y: this.y + this.height * 0.75},  // Bottom left
-            {x: this.x + this.width * 0.75, y: this.y + this.height * 0.25},  // Top right
-            {x: this.x + this.width * 0.75, y: this.y + this.height * 0.75}   // Bottom right
-        ];
-    }
-    
-    getDebugInfo() {
-        const courtPlayers = players.filter(p => p.currentCourt === this);
-        return {
-            courtNumber: this.index + 1,
-            position: { x: this.x, y: this.y },
-            playerCount: courtPlayers.length,
-            playerStates: courtPlayers.map(p => ({
-                id: p.id,
-                state: p.state,
-                position: p.body.position,
-                target: p.targetX !== null ? { x: p.targetX, y: p.targetY } : null
-            })),
-            isMatchReady: this.isMatchReady()
-        };
-    }
-
-    isMatchReady() {
-        const courtPlayers = players.filter(p => p.currentCourt === this && p.state === 'playing');
-        if (courtPlayers.length !== 4) return false;
-        
-        // All players must be in 'playing' state
-        return courtPlayers.every(p => p.state === 'playing');
-    }
-    
-    draw() {
-        const isReady = this.isMatchReady();
-        logDebugInfo(`Court ${this.index + 1} Status`, {
-            isReady,
-            playerCount: players.filter(p => p.currentCourt === this).length,
-            playerStates: players
-                .filter(p => p.currentCourt === this)
-                .map(p => ({ id: p.id, state: p.state }))
         });
-        
-        // Draw court background
-        ctx.fillStyle = isReady ? '#90EE90' : '#FFB6C1';
-        ctx.fillRect(this.x, this.y, this.width, this.height);
-        
-        // Draw court border
-        ctx.strokeStyle = '#000';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(this.x, this.y, this.width, this.height);
-        
-        // Draw court number and player count
-        const courtPlayers = players.filter(p => p.currentCourt === this);
-        ctx.fillStyle = '#000';
-        ctx.font = '16px Arial';
-        ctx.textAlign = 'center';
-        ctx.fillText(`Court ${this.index + 1} (${courtPlayers.length}/4)`, 
-                    this.x + this.width/2, 
-                    this.y - 5);
 
-        // Draw court positions
-        this.positions.forEach((pos, idx) => {
-            ctx.beginPath();
-            ctx.arc(pos.x, pos.y, 5, 0, Math.PI * 2);
-            ctx.fillStyle = '#666';
-            ctx.fill();
-        });
-    }
-}
-
-function assignPlayersToMatch(players, court) {
-    const positions = court.positions;
-    players.forEach((player, index) => {
-        player.state = 'moving_to_court';
-        player.currentCourt = court;
-        player.courtPosition = index;
-        
-        // Calculate path through nearest thoroughfare
-        const thoroughfareY = court.index < 3 ? 
-            THOROUGHFARE_HEIGHT : CANVAS_HEIGHT - THOROUGHFARE_HEIGHT;
-        
-        // First move to thoroughfare
-        const entryPoint = {
-            x: WAITING_AREA_WIDTH + 30,
-            y: thoroughfareY
-        };
-        
-        // Move to thoroughfare first
-        player.moveTo(entryPoint.x, entryPoint.y);
-        
-        // Set timeout to move to final court position
-        setTimeout(() => {
-            player.moveTo(positions[index].x, positions[index].y);
-        }, 2000);
-    });
-}
-
-function movePlayerToTarget(player, targetX, targetY) {
-    // Check move delay
-    if (player.moveDelay > 0) {
-        player.moveDelay -= 1/60; // Decrease delay each frame
-        return false;
+        this.updatePlayerVisuals();
     }
 
-    // Make sure body is dynamic
-    if (player.body.isStatic) {
-        Matter.Body.setStatic(player.body, false);
-    }
-    
-    // Initialize waypoints if not exists
-    if (!player.waypoints) {
-        player.waypoints = calculatePathToTarget(player, targetX, targetY);
-    }
-    
-    // Get next waypoint
-    const nextWaypoint = findNextWaypoint(player);
-    if (!nextWaypoint) {
-        // No more waypoints, snap to final position
-        Matter.Body.setPosition(player.body, { x: targetX, y: targetY });
-        Matter.Body.setVelocity(player.body, { x: 0, y: 0 });
-        Matter.Body.setAngularVelocity(player.body, 0);
-        Matter.Body.setStatic(player.body, true);
-        player.waypoints = null;
-        return true;
-    }
-    
-    // Check for nearby players in the direction of movement
-    const dx = nextWaypoint.x - player.body.position.x;
-    const dy = nextWaypoint.y - player.body.position.y;
-    const distance = Math.sqrt(dx * dx + dy * dy);
-    
-    // Check if path is blocked
-    const isBlocked = players.some(other => {
-        if (other === player || other.state === 'playing') return false;
-        
-        const odx = other.body.position.x - player.body.position.x;
-        const ody = other.body.position.y - player.body.position.y;
-        const otherDistance = Math.sqrt(odx * odx + ody * ody);
-        
-        // Check if other player is close and in our path
-        if (otherDistance < PLAYER_RADIUS * 4) {
-            const dotProduct = (dx * odx + dy * ody) / (distance * otherDistance);
-            return dotProduct > 0.7; // Player is roughly in our direction
-        }
-        return false;
-    });
-    
-    if (isBlocked) {
-        // Stop and wait but stay dynamic
-        Matter.Body.setVelocity(player.body, { x: 0, y: 0 });
-        return false;
-    }
-    
-    // Move towards next waypoint with player's unique speed
-    const speed = player.speed;
-    const vx = (dx / distance) * speed;
-    const vy = (dy / distance) * speed;
-    
-    // Update velocity and ensure body is awake
-    Matter.Body.setVelocity(player.body, { x: vx, y: vy });
-    Matter.Body.setAngularVelocity(player.body, 0);
-    Matter.Sleeping.set(player.body, false);
-    
-    // Draw path for debugging
-    if (DEBUG) {
-        ctx.beginPath();
-        ctx.moveTo(player.body.position.x, player.body.position.y);
-        player.waypoints.forEach(waypoint => {
-            ctx.lineTo(waypoint.x, waypoint.y);
-        });
-        ctx.strokeStyle = '#0f0';
-        ctx.stroke();
-    }
-    
-    return false;
-}
+    updatePlayerVisuals() {
+        // Update existing players
+        const players = this.svg.selectAll('.player')
+            .data(this.players, d => d.id);
 
-function initializePlayer(id, gender) {
-    const radius = PLAYER_RADIUS;
-    const body = Bodies.circle(0, 0, radius, {
-        friction: 0.001,
-        frictionAir: 0.001,
-        restitution: 0.1,
-        inertia: Infinity,
-        density: 0.001,
-        isStatic: false,
-        label: `player_${id}`
-    });
-    
-    const player = {
-        id,
-        body,
-        gender,
-        state: 'waiting',
-        currentCourt: null,
-        courtPosition: null,
-        targetX: null,
-        targetY: null,
-        matchStartTime: null,
-        waypoints: null,
-        moveDelay: Math.random() * 0.5,
-        speed: 1.5 + Math.random() * 1.5
-    };
-    
-    // Make sure body references player
-    body.plugin = { player };
-    
-    return player;
-}
+        // Remove old players
+        players.exit().remove();
 
-function calculatePathToTarget(player, targetX, targetY) {
-    const waypoints = [];
-    const currentPos = player.body.position;
-    
-    // If player is in waiting area and needs to go to court
-    if (player.state === 'moving_to_court' && player.currentCourt) {
-        // First move to thoroughfare entrance
-        const thoroughfareY = player.currentCourt.index < 3 ? 
-            TOP_THOROUGHFARE_Y + THOROUGHFARE_HEIGHT/2 : 
-            BOTTOM_THOROUGHFARE_Y + THOROUGHFARE_HEIGHT/2;
-            
-        // Add waypoint at waiting area exit
-        waypoints.push({
-            x: WAITING_AREA_WIDTH - PLAYER_RADIUS * 2,
-            y: currentPos.y
-        });
-        
-        // Add waypoint at thoroughfare entrance
-        waypoints.push({
-            x: WAITING_AREA_WIDTH + PLAYER_RADIUS * 2,
-            y: thoroughfareY
-        });
-        
-        // Add waypoint in front of court
-        waypoints.push({
-            x: player.currentCourt.x - PLAYER_RADIUS * 2,
-            y: thoroughfareY
-        });
-    }
-    
-    // Add final target
-    waypoints.push({ x: targetX, y: targetY });
-    
-    return waypoints;
-}
+        // Add new players
+        const newPlayers = players.enter()
+            .append('g')
+            .attr('class', 'player');
 
-function findNextWaypoint(player) {
-    if (!player.waypoints || player.waypoints.length === 0) {
-        // Calculate new path to target
-        if (player.targetX !== null && player.targetY !== null) {
-            player.waypoints = calculatePathToTarget(player, player.targetX, player.targetY);
-        }
-        return null;
-    }
-    
-    // Check if we've reached current waypoint
-    const currentWaypoint = player.waypoints[0];
-    const dx = currentWaypoint.x - player.body.position.x;
-    const dy = currentWaypoint.y - player.body.position.y;
-    const distance = Math.sqrt(dx * dx + dy * dy);
-    
-    if (distance < 1) {
-        // Remove reached waypoint
-        player.waypoints.shift();
-        return player.waypoints[0] || null;
-    }
-    
-    return currentWaypoint;
-}
+        newPlayers.append('circle')
+            .attr('r', 15);
 
-function assignPlayersToAvailableCourts() {
-    const availableCourts = courts
-        .filter(court => !court.currentMatch && !players.some(p => p.currentCourt === court))
-        .sort((a, b) => a.index - b.index);
-        
-    const waitingPlayers = players
-        .filter(p => p.state === 'waiting' && !p.currentCourt)
-        .sort((a, b) => a.id - b.id);
-    
-    logDebugInfo('Court Assignment Check', {
-        availableCourts: availableCourts.map(c => c.index + 1),
-        waitingPlayerCount: waitingPlayers.length,
-        currentTime
-    });
-    
-    // Assign players with delays
-    availableCourts.forEach(court => {
-        if (waitingPlayers.length >= 4) {
-            const playersForCourt = waitingPlayers.splice(0, 4);
-            
-            // Add random delays to stagger movement
-            playersForCourt.forEach((player, idx) => {
-                player.moveDelay = idx * 0.2 + Math.random() * 0.3; // Stagger starts plus random offset
-            });
-            
-            // Assign players to court
-            playersForCourt.forEach((player, idx) => {
-                player.state = 'moving_to_court';
-                player.currentCourt = court;
-                player.courtPosition = idx;
-                const pos = court.positions[idx];
-                player.targetX = pos.x;
-                player.targetY = pos.y;
-            });
-            
-            // Initialize match
-            court.currentMatch = {
-                startTime: currentTime,
-                players: playersForCourt.map(p => p.id)
-            };
-        }
-    });
-}
+        newPlayers.append('text')
+            .attr('class', 'player-id')
+            .text(d => d.id);
 
-function updateSimulation() {
-    // Reset debug info
-    debugInfo = {
-        playerStates: {},
-        courtInfo: [],
-        waitingPlayers: 0,
-        thoroughfarePositions: [],
-        errors: [],
-        courtAssignments: []
-    };
-    
-    try {
-        // First, check for available courts and waiting players
-        assignPlayersToAvailableCourts();
-        
+        // Add wait time text element
+        newPlayers.append('text')
+            .attr('class', 'wait-time')
+            .attr('x', 12)
+            .attr('y', -12)
+            .style('font-size', '10px')
+            .style('fill', 'black');
+
+        // Add games played counter
+        newPlayers.append('text')
+            .attr('class', 'games-played')
+            .attr('x', -12)
+            .attr('y', -12)
+            .style('font-size', '10px')
+            .style('fill', 'black');
+
         // Update all players
-        players.forEach(player => {
-            try {
-                switch (player.state) {
-                    case 'waiting':
-                        if (!player.currentCourt) {
-                            const waitingIndex = players
-                                .filter(p => p.state === 'waiting' && !p.currentCourt)
-                                .sort((a, b) => a.id - b.id)
-                                .findIndex(p => p.id === player.id);
-                                
-                            if (waitingIndex !== -1) {
-                                const col = Math.floor(waitingIndex / 6);
-                                const row = waitingIndex % 6;
-                                const targetX = col * (PLAYER_RADIUS * 3) + PLAYER_RADIUS * 2;
-                                const targetY = row * (PLAYER_RADIUS * 3) + PLAYER_RADIUS * 2;
-                                movePlayerToTarget(player, targetX, targetY);
-                            }
-                        }
-                        break;
-                        
-                    case 'moving_to_court':
-                        if (player.targetX !== null && player.targetY !== null) {
-                            const arrived = movePlayerToTarget(player, player.targetX, player.targetY);
-                            if (arrived) {
-                                player.state = 'playing';
-                                player.matchStartTime = currentTime;
-                                
-                                // Ensure player is static and exactly at position
-                                const pos = player.currentCourt.positions[player.courtPosition];
-                                Matter.Body.setPosition(player.body, pos);
-                                Matter.Body.setStatic(player.body, true);
-                                
-                                logDebugInfo('Player Arrived at Court', {
-                                    playerId: player.id,
-                                    courtNumber: player.currentCourt.index + 1,
-                                    position: player.courtPosition,
-                                    time: currentTime
-                                });
-                            }
-                        }
-                        break;
-                        
-                    case 'playing':
-                        // Ensure player stays exactly at their position
-                        const pos = player.currentCourt.positions[player.courtPosition];
-                        Matter.Body.setPosition(player.body, pos);
-                        Matter.Body.setStatic(player.body, true);
-                        
-                        if (player.matchStartTime && (currentTime - player.matchStartTime) >= matchDuration * 60) {
-                            player.state = 'returning';
-                            player.targetX = WAITING_AREA_WIDTH / 2;
-                            player.targetY = CANVAS_HEIGHT - THOROUGHFARE_HEIGHT / 2;
-                            player.currentCourt.currentMatch = null;
-                            player.matchStartTime = null;
-                            Matter.Body.setStatic(player.body, false);
-                        }
-                        break;
-                        
-                    case 'returning':
-                        if (player.targetX !== null && player.targetY !== null) {
-                            const arrived = movePlayerToTarget(player, player.targetX, player.targetY);
-                            if (arrived) {
-                                player.state = 'waiting';
-                                player.currentCourt = null;
-                                player.courtPosition = null;
-                                player.targetX = null;
-                                player.targetY = null;
-                                Matter.Body.setStatic(player.body, true);
-                            }
-                        }
-                        break;
-                }
-                
-                // Track player states
-                debugInfo.playerStates[player.state] = (debugInfo.playerStates[player.state] || 0) + 1;
-                
-                // Track thoroughfare positions
-                if (player.state === 'moving_to_court' || player.state === 'returning') {
-                    debugInfo.thoroughfarePositions.push({
-                        id: player.id,
-                        position: player.body.position,
-                        state: player.state
-                    });
-                }
-            } catch (error) {
-                debugInfo.errors.push({
-                    playerId: player.id,
-                    error: error.message,
-                    stack: error.stack,
-                    state: player.state,
-                    position: player.body ? player.body.position : null
-                });
-            }
-        });
-        
-        // Update court info for debugging
-        courts.forEach(court => {
-            debugInfo.courtInfo.push({
-                ...court.getDebugInfo(),
-                assignedPlayers: players
-                    .filter(p => p.currentCourt === court)
-                    .map(p => ({
-                        id: p.id,
-                        state: p.state,
-                        position: p.courtPosition
-                    }))
+        this.svg.selectAll('.player')
+            .attr('transform', d => `translate(${d.x},${d.y})`);
+
+        // Update circles
+        this.svg.selectAll('.player circle')
+            .style('fill', d => {
+                const baseColor = d.gender === 'M' ? 'blue' : 'pink';
+                if (d.inMatch) return baseColor; // Reset darkness when in match
+                const opacity = Math.max(0.3, 1 - (Math.floor(d.waitTime / 5) * 0.2)); // Darken by 20% every 5 minutes
+                return d3.color(baseColor).darker(1 - opacity);
             });
-        });
+
+        // Update wait time display
+        this.svg.selectAll('.player .wait-time')
+            .text(d => d.inMatch ? '' : d.waitTime > 0 ? d.waitTime : '')
+            .style('display', d => d.inMatch ? 'none' : 'block');
+
+        // Update games played counter
+        this.svg.selectAll('.player .games-played')
+            .text(d => d.gamesPlayed);
+    }
+
+    generateMatch() {
+        const availablePlayers = this.players.filter(p => !p.inMatch && !this.pendingMatches.some(m => m.players.includes(p)));
+        if (availablePlayers.length < 4) return false;
+
+        const males = availablePlayers.filter(p => p.gender === 'M');
+        const females = availablePlayers.filter(p => p.gender === 'F');
+
+        // Determine match generation order based on last match type
+        const lastMatch = [...this.matches, ...this.pendingMatches].slice(-1)[0];
+        const lastType = lastMatch ? lastMatch.type : null;
         
-        // Count waiting players
-        debugInfo.waitingPlayers = players.filter(p => p.state === 'waiting' && !p.currentCourt).length;
-        
-    } catch (error) {
-        debugInfo.errors.push({
-            error: error.message,
-            stack: error.stack,
-            phase: 'main_update'
-        });
-    }
-    
-    // Log debug info every second
-    if (Math.floor(currentTime) !== Math.floor(currentTime - 1/60)) {
-        logDebugInfo('Simulation State', debugInfo);
-    }
-}
-
-function draw() {
-    // Clear the canvas
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    
-    // Log render cycle
-    logDebugInfo('Render Cycle', {
-        time: currentTime,
-        canvasSize: { width: canvas.width, height: canvas.height },
-        activePlayerCount: players.length,
-        activeCourts: courts.length
-    });
-
-    try {
-        // Draw waiting area background
-        ctx.fillStyle = '#f0f0f0';
-        ctx.fillRect(0, 0, WAITING_AREA_WIDTH, canvas.height);
-
-        // Draw thoroughfares
-        ctx.fillStyle = '#e0e0e0';
-        ctx.fillRect(0, 0, canvas.width, THOROUGHFARE_HEIGHT); // Top thoroughfare
-        ctx.fillRect(0, canvas.height - THOROUGHFARE_HEIGHT, canvas.width, THOROUGHFARE_HEIGHT); // Bottom thoroughfare
-
-        // Draw courts with debug info
-        courts.forEach(court => {
-            // Draw court background
-            const courtPlayers = players.filter(p => p.currentCourt === court);
-            ctx.fillStyle = court.isMatchReady() ? '#90EE90' : '#FFB6C1';
-            ctx.fillRect(court.x, court.y, court.width, court.height);
-            
-            // Draw court border
-            ctx.strokeStyle = '#000';
-            ctx.lineWidth = 2;
-            ctx.strokeRect(court.x, court.y, court.width, court.height);
-            
-            // Draw court number and player count
-            ctx.fillStyle = '#000';
-            ctx.font = '16px Arial';
-            ctx.textAlign = 'center';
-            ctx.fillText(`Court ${court.index + 1} (${courtPlayers.length}/4)`, 
-                        court.x + court.width/2, 
-                        court.y - 5);
-
-            // Draw court positions
-            court.positions.forEach((pos, idx) => {
-                ctx.beginPath();
-                ctx.arc(pos.x, pos.y, 5, 0, Math.PI * 2);
-                ctx.fillStyle = '#666';
-                ctx.fill();
-            });
-        });
-
-        // Draw all players
-        players.forEach(player => {
-            if (!player || !player.body) {
-                logDebugInfo('Invalid Player', { player });
-                return;
-            }
-
-            try {
-                ctx.beginPath();
-                ctx.arc(player.body.position.x, player.body.position.y, PLAYER_RADIUS, 0, Math.PI * 2);
-                ctx.fillStyle = player.gender === 'M' ? '#4169E1' : '#FF69B4';
-                ctx.fill();
-                ctx.strokeStyle = '#000';
-                ctx.lineWidth = 1;
-                ctx.stroke();
-
-                // Draw player ID
-                ctx.fillStyle = '#000';
-                ctx.font = '12px Arial';
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.fillText(player.id.toString(), player.body.position.x, player.body.position.y);
-
-                // Draw debug line to target if moving
-                if (player.targetX !== null && player.targetY !== null) {
-                    ctx.beginPath();
-                    ctx.moveTo(player.body.position.x, player.body.position.y);
-                    ctx.lineTo(player.targetX, player.targetY);
-                    ctx.strokeStyle = '#00ff00';
-                    ctx.lineWidth = 1;
-                    ctx.stroke();
-                }
-            } catch (error) {
-                logDebugInfo('Player Render Error', {
-                    playerId: player.id,
-                    error: error.message,
-                    position: player.body.position,
-                    state: player.state
-                });
-            }
-        });
-
-        // Request next frame
-        requestAnimationFrame(gameLoop);
-    } catch (error) {
-        logDebugInfo('Main Render Error', {
-            error: error.message,
-            stack: error.stack
-        });
-        // Still request next frame even if there's an error
-        requestAnimationFrame(gameLoop);
-    }
-}
-
-function updateTimeDisplay() {
-    const minutes = Math.floor(currentTime / 60);
-    const seconds = Math.floor(currentTime % 60);
-    const timeDisplay = document.getElementById('timeDisplay');
-    if (timeDisplay) {
-        timeDisplay.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
-    }
-    
-    const timeSlider = document.getElementById('timeSlider');
-    if (timeSlider) {
-        timeSlider.value = currentTime;
-    }
-}
-
-function gameLoop() {
-    const now = performance.now();
-    const deltaTime = 1/60; // Fixed time step
-    currentTime += deltaTime;
-    
-    try {
-        Engine.update(engine, 1000 * deltaTime);
-        updateSimulation();
-        draw();
-        
-        // Update time display
-        updateTimeDisplay();
-        
-    } catch (error) {
-        logDebugInfo('Game Loop Error', {
-            error: error.message,
-            stack: error.stack,
-            time: currentTime
-        });
-        // Ensure we keep running even if there's an error
-        requestAnimationFrame(gameLoop);
-    }
-}
-
-function initializeSimulation() {
-    // Create engine and world
-    engine = Engine.create({
-        enableSleeping: false,
-        constraintIterations: 4,
-        velocityIterations: 8,
-        positionIterations: 6
-    });
-    
-    engine.world.gravity.y = 0;
-    
-    // Create players
-    players = [];
-    for (let i = 0; i < TOTAL_PLAYERS; i++) {
-        const gender = i % 2 === 0 ? 'M' : 'F';
-        const player = initializePlayer(i + 1, gender);
-        const waitingPos = getWaitingPosition(i + 1);
-        Matter.Body.setPosition(player.body, waitingPos);
-        players.push(player);
-        World.add(engine.world, player.body);
-    }
-    
-    // Create courts
-    courts = [];
-    for (let i = 0; i < NUM_COURTS; i++) {
-        courts.push(new Court(i));
-    }
-    
-    // Initialize time
-    startTime = Date.now();
-    currentTime = 0;
-    
-    // Start game loop
-    requestAnimationFrame(updateSimulation);
-}
-
-function updateSimulation() {
-    // Reset debug info
-    debugInfo = {
-        courts: [],
-        players: [],
-        errors: []
-    };
-
-    // Update current time
-    currentTime = (Date.now() - startTime) / 1000;
-    
-    // Assign waiting players to available courts
-    assignPlayersToAvailableCourts();
-    
-    // Update player states and positions
-    players.forEach(player => {
-        try {
-            updatePlayerState(player);
-            
-            // Log player state for debugging
-            if (DEBUG) {
-                console.log(`Player ${player.id}: state=${player.state}, pos=(${Math.round(player.body.position.x)}, ${Math.round(player.body.position.y)}), vel=(${Math.round(player.body.velocity.x*100)/100}, ${Math.round(player.body.velocity.y*100)/100}), static=${player.body.isStatic}`);
-            }
-        } catch (error) {
-            player.lastError = error;
-            debugInfo.errors.push(`Error updating player ${player.id}: ${error.message}`);
+        let matchTypes = [];
+        if (lastType === "Mixed") {
+            matchTypes = ["Mens", "Womens", "Mixed"];
+        } else if (lastType === "Mens") {
+            matchTypes = ["Womens", "Mixed", "Mens"];
+        } else {
+            matchTypes = ["Mixed", "Mens", "Womens"];
         }
-    });
 
-    // Update Matter.js physics
-    Engine.update(engine, 1000/60);
+        // Try to generate matches in the determined order
+        for (const matchType of matchTypes) {
+            if (matchType === "Mixed" && males.length >= 2 && females.length >= 2) {
+                const maleCombos = this.getCombinations(males, 2);
+                const bestMales = this.getBestCombination(maleCombos);
+                
+                const femaleCombos = this.getCombinations(females, 2);
+                const bestFemales = this.getBestCombination(femaleCombos);
+                
+                if (bestMales && bestFemales) {
+                    const players = [...bestMales, ...bestFemales];
+                    this.pendingMatches.push({
+                        players: players,
+                        duration: this.matchDuration,
+                        type: "Mixed"
+                    });
+                    players.forEach(p => p.inMatch = true);
+                    return true;
+                }
+            } else if (matchType === "Mens" && males.length >= 4) {
+                const maleCombos = this.getCombinations(males, 4);
+                const bestMales = this.getBestCombination(maleCombos);
+                
+                if (bestMales) {
+                    this.pendingMatches.push({
+                        players: bestMales,
+                        duration: this.matchDuration,
+                        type: "Mens"
+                    });
+                    bestMales.forEach(p => p.inMatch = true);
+                    return true;
+                }
+            } else if (matchType === "Womens" && females.length >= 4) {
+                const femaleCombos = this.getCombinations(females, 4);
+                const bestFemales = this.getBestCombination(femaleCombos);
+                
+                if (bestFemales) {
+                    this.pendingMatches.push({
+                        players: bestFemales,
+                        duration: this.matchDuration,
+                        type: "Womens"
+                    });
+                    bestFemales.forEach(p => p.inMatch = true);
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
 
-    // Draw everything
-    drawSimulation();
-    
-    // Continue game loop
-    requestAnimationFrame(updateSimulation);
-}
-
-function drawSimulation() {
-    // Clear the canvas
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    
-    // Draw waiting area background
-    ctx.fillStyle = '#f0f0f0';
-    ctx.fillRect(0, 0, WAITING_AREA_WIDTH, canvas.height);
-
-    // Draw thoroughfares
-    ctx.fillStyle = '#e0e0e0';
-    ctx.fillRect(0, 0, canvas.width, THOROUGHFARE_HEIGHT); // Top thoroughfare
-    ctx.fillRect(0, canvas.height - THOROUGHFARE_HEIGHT, canvas.width, THOROUGHFARE_HEIGHT); // Bottom thoroughfare
-
-    // Draw courts with debug info
-    courts.forEach(court => {
-        // Draw court background
-        const courtPlayers = players.filter(p => p.currentCourt === court);
-        ctx.fillStyle = court.isMatchReady() ? '#90EE90' : '#FFB6C1';
-        ctx.fillRect(court.x, court.y, court.width, court.height);
+    getCombinations(players, count) {
+        const results = [];
+        if (count === 0) {
+            return [[]];
+        }
+        if (players.length < count) {
+            return [];
+        }
         
-        // Draw court border
-        ctx.strokeStyle = '#000';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(court.x, court.y, court.width, court.height);
+        const firstPlayer = players[0];
+        const rest = players.slice(1);
         
-        // Draw court number and player count
-        ctx.fillStyle = '#000';
-        ctx.font = '16px Arial';
-        ctx.textAlign = 'center';
-        ctx.fillText(`Court ${court.index + 1} (${courtPlayers.length}/4)`, 
-                    court.x + court.width/2, 
-                    court.y - 5);
+        // Get combinations that include the first player
+        const combosWithFirst = this.getCombinations(rest, count - 1).map(combo => [firstPlayer, ...combo]);
+        
+        // Get combinations that don't include the first player
+        const combosWithoutFirst = this.getCombinations(rest, count);
+        
+        return [...combosWithFirst, ...combosWithoutFirst];
+    }
 
-        // Draw court positions
-        court.positions.forEach((pos, idx) => {
-            ctx.beginPath();
-            ctx.arc(pos.x, pos.y, 5, 0, Math.PI * 2);
-            ctx.fillStyle = '#666';
-            ctx.fill();
+    getBestCombination(combinations) {
+        if (combinations.length === 0) return null;
+        
+        let bestScore = Number.NEGATIVE_INFINITY;
+        let bestCombo = null;
+        
+        for (const combo of combinations) {
+            const score = this.scoreCombination(combo);
+            if (score > bestScore) {
+                bestScore = score;
+                bestCombo = combo;
+            }
+        }
+        
+        return bestCombo;
+    }
+
+    scoreCombination(players) {
+        let score = 0;
+        
+        // Factor 1: Wait time priority
+        const waitTimes = players.map(p => p.waitTime);
+        const maxWaitTime = Math.max(...waitTimes);
+        score += maxWaitTime * 3;
+        
+        // Factor 2: Match count balancing
+        const gamesPlayed = players.map(p => p.gamesPlayed);
+        score -= Math.max(...gamesPlayed) * 2;
+        
+        // Factor 3: Player interaction history (simplified for visualization)
+        // In a real system, we would track who has played with/against whom
+        
+        return score;
+    }
+
+    assignPlayersToMatch(players, court, matchType) {
+        // Position players on court
+        const positions = [
+            { x: court.x + 45, y: court.y + 60 },
+            { x: court.x + 45, y: court.y + 180 },
+            { x: court.x + 135, y: court.y + 60 },
+            { x: court.x + 135, y: court.y + 180 }
+        ];
+
+        players.forEach((player, i) => {
+            player.x = positions[i].x;
+            player.y = positions[i].y;
+            player.inMatch = true;
+            player.waitTime = 0;
+            player.gamesPlayed += 1; // Increment games played when assigned to court
         });
-    });
 
-    // Draw all players
-    players.forEach(player => {
-        if (!player || !player.body) {
-            logDebugInfo('Invalid Player', { player });
+        court.players = players;
+    }
+
+    updateMatches() {
+        // End matches that are complete
+        this.matches = this.matches.filter(match => {
+            if (this.timeElapsed - match.startTime >= match.duration) {
+                // Just mark players as not in match and clear court
+                match.players.forEach(p => {
+                    p.inMatch = false;
+                });
+                // Clear court
+                this.courts[match.court].players = [];
+                this.positionWaitingPlayers();
+                return false;
+            }
+            return true;
+        });
+
+        // Try to assign pending matches to available courts
+        const availableCourts = this.courts.filter(c => c.players.length === 0);
+        while (availableCourts.length > 0 && this.pendingMatches.length > 0) {
+            const court = availableCourts.shift();
+            const match = this.pendingMatches.shift();
+            this.assignPlayersToMatch(match.players, court, match.type);
+            match.court = court.id;
+            match.startTime = this.timeElapsed;
+            this.matches.push(match);
+        }
+
+        // Generate new matches if needed
+        const availableCourtCount = this.courts.filter(c => c.players.length === 0).length;
+        if (availableCourtCount > 0 && this.pendingMatches.length < 3) {
+            // Generate up to 3 matches based on match generation logic
+            this.generateMatch();
+        }
+    }
+
+    updateWaitTimes() {
+        this.players.forEach(player => {
+            if (!player.inMatch) {
+                player.waitTime += 1;
+            }
+        });
+    }
+
+    updateStats() {
+        const stats = document.getElementById('currentStats');
+        const waitingPlayers = this.players.filter(p => !p.inMatch);
+        const malesWaiting = waitingPlayers.filter(p => p.gender === 'M').length;
+        const femalesWaiting = waitingPlayers.filter(p => p.gender === 'F').length;
+        
+        stats.innerHTML = `
+            <p>Time: ${Math.floor(this.timeElapsed / 60)}h ${this.timeElapsed % 60}m</p>
+            <p>Players Waiting: ${waitingPlayers.length}</p>
+            <p>- Males: ${malesWaiting}</p>
+            <p>- Females: ${femalesWaiting}</p>
+            <p>Active Matches: ${this.matches.length}</p>
+            <p>Pending Matches: ${this.pendingMatches.length}</p>
+        `;
+    }
+
+    updateSimulation() {
+        this.updateMatches();
+        this.updatePlayerVisuals();
+        this.updateStats();
+        
+        // Update slider if running automatically
+        if (this.isRunning) {
+            document.getElementById('timeSlider').noUiSlider.set(this.timeElapsed);
+        }
+    }
+
+    start() {
+        if (!this.isRunning) {
+            this.isRunning = true;
+            this.simulationLoop();
+        }
+    }
+
+    pause() {
+        this.isRunning = false;
+    }
+
+    reset() {
+        this.isRunning = false;
+        this.timeElapsed = 0;
+        this.matches = [];
+        this.pendingMatches = [];
+        this.courts.forEach(court => court.players = []);
+        document.getElementById('timeSlider').noUiSlider.set(0);
+        this.initializePlayers();
+        this.updateSimulation();
+    }
+
+    simulationLoop() {
+        if (!this.isRunning || this.timeElapsed >= this.totalDuration) {
+            this.isRunning = false;
             return;
         }
 
-        try {
-            ctx.beginPath();
-            ctx.arc(player.body.position.x, player.body.position.y, PLAYER_RADIUS, 0, Math.PI * 2);
-            ctx.fillStyle = player.gender === 'M' ? '#4169E1' : '#FF69B4';
-            ctx.fill();
-            ctx.strokeStyle = '#000';
-            ctx.lineWidth = 1;
-            ctx.stroke();
+        this.timeElapsed += 1;
+        this.updateWaitTimes();
+        this.updateSimulation();
 
-            // Draw player ID
-            ctx.fillStyle = '#000';
-            ctx.font = '12px Arial';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(player.id.toString(), player.body.position.x, player.body.position.y);
-
-            // Draw debug line to target if moving
-            if (player.targetX !== null && player.targetY !== null) {
-                ctx.beginPath();
-                ctx.moveTo(player.body.position.x, player.body.position.y);
-                ctx.lineTo(player.targetX, player.targetY);
-                ctx.strokeStyle = '#00ff00';
-                ctx.lineWidth = 1;
-                ctx.stroke();
-            }
-        } catch (error) {
-            logDebugInfo('Player Render Error', {
-                playerId: player.id,
-                error: error.message,
-                position: player.body.position,
-                state: player.state
-            });
-        }
-    });
-}
-
-function updatePlayerState(player) {
-    // Update player state based on current position and target
-    if (player.targetX !== null && player.targetY !== null) {
-        const dx = player.targetX - player.body.position.x;
-        const dy = player.targetY - player.body.position.y;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-        
-        if (distance > 1) {
-            const speed = 3;
-            const vx = (dx / distance) * speed;
-            const vy = (dy / distance) * speed;
-            Matter.Body.setVelocity(player.body, { x: vx, y: vy });
-        } else {
-            Matter.Body.setVelocity(player.body, { x: 0, y: 0 });
-            
-            // Handle movement queue
-            if (player.movementQueue && player.movementQueue.length > 0) {
-                player.movementQueue.shift();
-                if (player.movementQueue.length > 0) {
-                    player.startNextMovement();
-                } else {
-                    // Movement complete
-                    if (player.state === 'returning') {
-                        player.state = 'waiting';
-                    } else if (player.state === 'moving_to_court') {
-                        player.state = 'playing';
-                        player.matchStartTime = currentTime;
-                    }
-                    player.targetX = null;
-                    player.targetY = null;
-                }
-            } else {
-                player.targetX = null;
-                player.targetY = null;
-            }
-        }
-    }
-    
-    // Maintain grid position if waiting
-    if (player.state === 'waiting') {
-        player.assignGridPosition();
-        if (player.gridPosition) {
-            const dx = player.gridPosition.x - player.body.position.x;
-            const dy = player.gridPosition.y - player.body.position.y;
-            const distance = Math.sqrt(dx * dx + dy * dy);
-            
-            if (distance > 1) {
-                const speed = 2;
-                const vx = (dx / distance) * speed;
-                const vy = (dy / distance) * speed;
-                Matter.Body.setVelocity(player.body, { x: vx, y: vy });
-            }
-        }
+        setTimeout(() => this.simulationLoop(), 1000); // 1 second = 1 minute in simulation
     }
 }
 
-function getWaitingPosition(playerId) {
-    const waitingIndex = playerId - 1;
-    const col = Math.floor(waitingIndex / 6);
-    const row = waitingIndex % 6;
-    const x = col * (PLAYER_RADIUS * 3) + PLAYER_RADIUS * 2;
-    const y = row * (PLAYER_RADIUS * 3) + PLAYER_RADIUS * 2;
-    return { x, y };
-}
-
-// Event listeners
-document.addEventListener('DOMContentLoaded', () => {
-    // Initialize UI elements if they exist
-    const playerSelect = document.getElementById('playerCount');
-    if (!playerSelect) {
-        logDebugInfo('Warning: playerCount select not found, using default value');
-    }
-    
-    const startButton = document.getElementById('startButton');
-    if (startButton) {
-        startButton.addEventListener('click', () => {
-            initializeSimulation();
-        });
-    } else {
-        logDebugInfo('Warning: startButton not found, simulation will start automatically');
-        initializeSimulation();
-    }
-});
-
-// Cleanup on page unload
-window.addEventListener('beforeunload', () => {
-    if (engine) {
-        Matter.World.clear(engine.world);
-        Matter.Engine.clear(engine);
-    }
-    if (runner) {
-        Matter.Runner.stop(runner);
-    }
-    engine = null;
-    runner = null;
-    players = [];
-    courts = [];
+// Initialize simulation when page loads
+window.addEventListener('load', () => {
+    const simulation = new PickleballSimulation();
+    simulation.reset();
+    simulation.start(); // Auto-start the simulation
 });
