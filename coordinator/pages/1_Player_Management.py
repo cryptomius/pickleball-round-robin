@@ -213,6 +213,8 @@ st.header("Add New Player")
 if st.session_state.form_submitted:
     st.session_state.new_player_input = ""
     st.session_state.player_gender = config.GENDER_MALE
+    st.session_state.form_submitted = False
+    sheets_mgr._clear_cache()  # Clear the cache before rerunning
 
 with st.form("add_player_form"):
     new_player = st.text_input("Player Name", key="new_player_input", value=st.session_state.new_player_input)
@@ -226,6 +228,7 @@ with st.form("add_player_form"):
         if sheets_mgr.add_player(new_player.strip(), gender == config.GENDER_FEMALE):
             st.success(f"Added {new_player}")
             st.session_state.form_submitted = True
+            sheets_mgr._clear_cache()  # Clear the cache after adding player
             st.rerun()
         else:
             st.error("Failed to add player")

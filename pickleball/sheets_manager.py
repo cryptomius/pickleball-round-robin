@@ -557,12 +557,12 @@ class SheetsManager:
         players_df = pd.concat([players_df, pd.DataFrame([new_player])], ignore_index=True)
         
         # Update sheet
-        try:
-            self.update_sheet(config.SHEET_PLAYERS, [players_df.columns.tolist()] + players_df.values.tolist())
-            return True
-        except Exception as e:
-            st.error(f"Error adding player: {str(e)}")
-            return False
+        success = self.update_sheet(config.SHEET_PLAYERS, [players_df.columns.tolist()] + players_df.values.tolist())
+        
+        if success:
+            self._clear_cache()  # Clear the cache after successful update
+        
+        return success
 
     def get_match_key(self, team1_players, team2_players):
         """Create a unique key for a match that is the same regardless of player order"""
@@ -722,7 +722,7 @@ class SheetsManager:
             # Update the sheet if changes were made
             if updates_made:
                 self.update_sheet(config.SHEET_MATCHES, [matches_df.columns.tolist()] + matches_df.values.tolist())
-                st.success("Successfully assigned courts to pending matches")
+                #st.success("Successfully assigned courts to pending matches")
                 return True
             
             return False
