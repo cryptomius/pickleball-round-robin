@@ -101,18 +101,14 @@ if not pending_matches.empty and not scheduled_matches.empty:
             match[config.COL_TEAM1_PLAYER1], match[config.COL_TEAM1_PLAYER2],
             match[config.COL_TEAM2_PLAYER1], match[config.COL_TEAM2_PLAYER2]
         ]
-        has_conflict = False
-        for player in match_players:
-            if player in scheduled_matches[config.COL_TEAM1_PLAYER1].values or \
-               player in scheduled_matches[config.COL_TEAM1_PLAYER2].values or \
-               player in scheduled_matches[config.COL_TEAM2_PLAYER1].values or \
-               player in scheduled_matches[config.COL_TEAM2_PLAYER2].values:
-                blocking_players.add(player)
-                has_conflict = True
+        match_players = [p for p in match_players if pd.notna(p)]  # Remove any NaN values
         
-        # If we find a match without conflicts, stop collecting blocking players
-        if not has_conflict:
-            break
+        for player in match_players:
+            if (player in scheduled_matches[config.COL_TEAM1_PLAYER1].values or 
+                player in scheduled_matches[config.COL_TEAM1_PLAYER2].values or 
+                player in scheduled_matches[config.COL_TEAM2_PLAYER1].values or 
+                player in scheduled_matches[config.COL_TEAM2_PLAYER2].values):
+                blocking_players.add(player)
 
 # Court Status Overview
 st.header("Court Status")
@@ -151,8 +147,8 @@ if len(active_courts) > 0:
                 team2_p1 = format_court_player(current_match[config.COL_TEAM2_PLAYER1])
                 team2_p2 = format_court_player(current_match[config.COL_TEAM2_PLAYER2])
                 
-                st.write(f"T1: {team1_p1}, {team1_p2}")
-                st.write(f"T2: {team2_p1}, {team2_p2}")
+                st.markdown(f"T1: {team1_p1}, {team1_p2}")
+                st.markdown(f"T2: {team2_p1}, {team2_p2}")
                 
                 # Cancel button above score fields
                 if st.button("Cancel Match", key=f"cancel_current_{current_match[config.COL_MATCH_ID]}"):
