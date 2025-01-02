@@ -22,6 +22,10 @@ st.markdown("""
     .appview-container {
         margin: 0 12px;
     }
+    /* Hide stale data */
+    div[data-stale="true"] {
+        display: none !important;
+    }
     /* Court status styling */
     .court-header {
         background-color: #1f77b4;
@@ -216,7 +220,7 @@ def display_pending(matches_df):
             st.markdown(pending_content, unsafe_allow_html=True)
     else:
         st.markdown(
-            '<div class="pending-content" style="text-align: center;">No Pending Matches</div>',
+            '<div class="pending-content" style="text-align: center;">Check back in a few mins</div>',
             unsafe_allow_html=True
         )
 
@@ -235,20 +239,9 @@ def main():
     with col2:
         display_pending(matches_df)
     
-    # Add a refresh time placeholder
-    placeholder = st.empty()
-    
     # Rerun every 60 seconds using Streamlit's native functionality
-    st.empty().markdown(
-        """
-        <script>
-            setTimeout(function(){
-                window.location.reload();
-            }, 60000);
-        </script>
-        """,
-        unsafe_allow_html=True
-    )
+    time.sleep(60)
+    st.rerun()
 
 if __name__ == "__main__":
     main()
