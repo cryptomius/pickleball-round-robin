@@ -284,6 +284,7 @@ with col1:
                 st.session_state.current_matches = current_matches
                 st.session_state.scheduled_matches = scheduled_matches
                 st.session_state.show_match_removal = True
+                sheets_mgr._clear_cache()  # Clear cache before rerun
                 st.rerun()
 
 with col2:
@@ -311,5 +312,8 @@ with col2:
         col_name, col_button = st.columns([3, 1])
         with col_button:
             if st.button("Activate", key=f"activate_{player[config.COL_NAME]}"):
-                sheets_mgr.update_player_status(player[config.COL_NAME], config.STATUS_ACTIVE)
-                st.rerun()
+                if sheets_mgr.update_player_status(player[config.COL_NAME], config.STATUS_ACTIVE):
+                    sheets_mgr._clear_cache()  # Clear cache after successful activation
+                    st.rerun()
+                else:
+                    st.error("Failed to activate player")

@@ -522,15 +522,27 @@ class SheetsManager:
 
     def update_player_status(self, player_name, status):
         """Update the status of a player."""
-        if status not in [config.STATUS_PLAYER_ACTIVE, config.STATUS_PLAYER_INACTIVE]:
-            raise ValueError(f"Invalid status: {status}")
-        
-        players_df = self.read_sheet(config.SHEET_PLAYERS)
-        player_idx = players_df[players_df[config.COL_NAME] == player_name].index[0]
-        players_df.loc[player_idx, config.COL_STATUS] = status
-        
-        # Update the sheet
-        self.update_sheet(config.SHEET_PLAYERS, [players_df.columns.tolist()] + players_df.values.tolist())
+        try:
+            if status not in [config.STATUS_PLAYER_ACTIVE, config.STATUS_PLAYER_INACTIVE]:
+                raise ValueError(f"Invalid status: {status}")
+            
+            players_df = self.read_sheet(config.SHEET_PLAYERS)
+            player_idx = players_df[players_df[config.COL_NAME] == player_name].index[0]
+            players_df.loc[player_idx, config.COL_STATUS] = status
+            
+            # Update the sheet
+            success = self.update_sheet(config.SHEET_PLAYERS, [players_df.columns.tolist()] + players_df.values.tolist())
+            
+            if success:
+                self._clear_cache()  # Clear cache after successful update
+                if status == config.STATUS_PLAYER_INACTIVE:
+                    # Handle removal of matches when deactivating
+                    self.handle_player_inactivation(player_name)
+                return True
+            return False
+        except Exception as e:
+            st.error(f"Error updating player status: {str(e)}")
+            return False
 
     def add_player(self, player_name, is_woman=False):
         """Add a new player to the Players sheet."""
@@ -1094,6 +1106,7 @@ class SheetsManager:
                 if success:
                     # Check and assign courts after removing matches
                     self.assign_courts_to_pending_matches()
+                    self._clear_cache()  # Clear cache after handling matches
                     return True, f"Removed {len(match_ids)} matches for inactive player"
                 else:
                     return False, "Failed to remove matches"
@@ -1101,7 +1114,8 @@ class SheetsManager:
             return True, "No active matches found for player"
             
         except Exception as e:
-            return False, f"Error handling player inactivation: {str(e)}"
+            st.error(f"Error handling player matches: {str(e)}")
+            return False, f"Error handling player matches: {str(e)}"
 
     def remove_matches(self, match_ids, assign_pending=True, return_freed_courts=False):
         """Remove specified matches from the Matches sheet and optionally assign pending matches to freed courts."""
