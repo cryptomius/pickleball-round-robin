@@ -187,7 +187,7 @@ if len(active_courts) > 0:
                                 clear_cache()  # Clear cache after write
                                 sheets_mgr.check_and_assign_courts()
                                 st.success("Score updated successfully!")
-                                st.experimental_rerun()
+                                st.rerun()
                             else:
                                 st.error("Failed to update match scores")
             else:

@@ -746,219 +746,293 @@ class SheetsManager:
     def generate_next_matches(self, active_players, court_count):
         """Generate optimal matches based on player history."""
         try:
-            #self.api_calls = 0  # Reset counter for this operation
+            import streamlit as st
             
             # Cache the players and matches data
-            players_df = self.read_sheet(config.SHEET_PLAYERS)
-            matches_df = self.read_sheet(config.SHEET_MATCHES)
-            
-            # Pre-calculate wait times for all players using cached matches_df
-            current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            player_wait_times = {
-                player: self._calculate_wait_time(player, current_time, matches_df)
-                for player in active_players
-            }
-            
-            # Filter out any players that are not marked as Active in the sheet
-            active_status_players = set(players_df[players_df[config.COL_STATUS] == "Active"][config.COL_NAME])
-            active_players = [p for p in active_players if p in active_status_players]
-            
-            player_genders = dict(zip(players_df[config.COL_NAME], players_df[config.COL_GENDER]))
-            
-            # Split players by gender using the players sheet information
-            male_players = [p for p in active_players if player_genders.get(p) == config.GENDER_MALE]
-            female_players = [p for p in active_players if player_genders.get(p) == config.GENDER_FEMALE]
-            
-            # Pre-calculate all player interactions using cached matches_df
-            player_interactions = self._get_player_interactions(matches_df)
-            for player in active_players:
-                if player not in player_interactions:
-                    player_interactions[player] = {'with': set(), 'against': set()}
-            
-            # Pre-calculate match counts using cached matches_df
-            player_match_counts = self._get_player_match_counts(active_players, matches_df)
-            
-            def score_combination(players, match_type):
-                score = 0
+            with st.spinner("Loading player and match data..."):
+                players_df = self.read_sheet(config.SHEET_PLAYERS)
+                matches_df = self.read_sheet(config.SHEET_MATCHES)
                 
-                # Use pre-calculated wait times
-                wait_times = [player_wait_times[p] for p in players]
-                max_wait_time = max(wait_times)
+                # Pre-calculate wait times for all players using cached matches_df
+                current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                self.player_wait_times = {
+                    player: self._calculate_wait_time(player, current_time, matches_df)
+                    for player in active_players
+                }
                 
-                # Heavily prioritize players who have been waiting longer
-                score += max_wait_time * 3
+                # Filter out any players that are not marked as Active in the sheet
+                active_status_players = set(players_df[players_df[config.COL_STATUS] == "Active"][config.COL_NAME])
+                active_players = [p for p in active_players if p in active_status_players]
                 
-                # Use pre-calculated match counts
-                games_played = [player_match_counts.get(p, 0) for p in players]
-                score -= max(games_played) * 2
+                player_genders = dict(zip(players_df[config.COL_NAME], players_df[config.COL_GENDER]))
                 
-                # Use pre-calculated interactions
-                for i, p1 in enumerate(players):
-                    for p2 in players[i+1:]:
-                        if p2 in player_interactions[p1]['with']:
-                            score -= 3
-                        if p2 in player_interactions[p1]['against']:
-                            score -= 2
+                # Split players by gender using the players sheet information
+                male_players = [p for p in active_players if player_genders.get(p) == config.GENDER_MALE]
+                female_players = [p for p in active_players if player_genders.get(p) == config.GENDER_FEMALE]
                 
-                return score
+                # Pre-calculate all player interactions using cached matches_df
+                self.player_interactions = self._get_player_interactions(matches_df)
+                for player in active_players:
+                    if player not in self.player_interactions:
+                        self.player_interactions[player] = {'with': set(), 'against': set()}
+                
+                # Pre-calculate match counts using cached matches_df
+                self.player_match_counts, self.match_type_counts = self._get_player_match_counts(active_players, matches_df)
             
-            # Helper function to get optimal player combination
-            def get_optimal_players(available_players, count):
-                if len(available_players) < count:
-                    return None
-                
-                # Get players with fewest games first
-                sorted_players = sorted(available_players, key=lambda p: player_match_counts.get(p, 0))
-                candidates = sorted_players[:min(count * 2, len(sorted_players))]
-                
-                # Try different combinations of players
-                best_score = float('-inf')
-                best_combination = None
-                
-                from itertools import combinations
-                for combo in combinations(candidates, count):
-                    score = score_combination(combo, "")
-                    if score > best_score:
-                        best_score = score
-                        best_combination = combo
-                
-                return list(best_combination) if best_combination else None
+            # Calculate current match type ratios
+            total_matches = len(matches_df) if not matches_df.empty else 0
+            if total_matches > 0:
+                mixed_ratio = len(matches_df[matches_df[config.COL_MATCH_TYPE] == 'Mixed']) / total_matches
+                mens_ratio = len(matches_df[matches_df[config.COL_MATCH_TYPE] == 'Mens']) / total_matches
+                womens_ratio = len(matches_df[matches_df[config.COL_MATCH_TYPE] == 'Womens']) / total_matches
+                print(f"Current match type ratios - Mixed: {mixed_ratio:.2f}, Mens: {mens_ratio:.2f}, Womens: {womens_ratio:.2f}")
             
-            # Generate matches
-            new_matches = []
-            match_id_counter = self._get_next_match_id()
+            # Generate all possible combinations
+            from itertools import combinations
+            possible_matches = []
             
-            # Determine match generation order based on last match type
-            last_match = self.read_sheet(config.SHEET_MATCHES).iloc[-1] if not self.read_sheet(config.SHEET_MATCHES).empty else None
-            last_type = last_match[config.COL_MATCH_TYPE] if last_match is not None else None
-            
-            match_types = []
-            if last_type == "Mixed":
-                match_types = ["Mens", "Womens", "Mixed"]
-            elif last_type == "Mens":
-                match_types = ["Womens", "Mixed", "Mens"]
-            else:
-                match_types = ["Mixed", "Mens", "Womens"]
-            
-            # Generate matches in determined order
-            for match_type in match_types:
-                count = 1
-                for _ in range(count):
-                    if match_type == "Mixed":
-                        if len(male_players) >= 2 and len(female_players) >= 2:
-                            males = get_optimal_players(male_players, 2)
-                            females = get_optimal_players(female_players, 2)
-                            if males and females:
-                                match = {
-                                    config.COL_MATCH_ID: f"M{match_id_counter}",
-                                    config.COL_COURT_NUMBER: "",
-                                    config.COL_TEAM1_PLAYER1: males[0],
-                                    config.COL_TEAM1_PLAYER2: females[0],
-                                    config.COL_TEAM2_PLAYER1: males[1],
-                                    config.COL_TEAM2_PLAYER2: females[1],
-                                    config.COL_START_TIME: "",
-                                    config.COL_END_TIME: "",
-                                    config.COL_TEAM1_SCORE: "",
-                                    config.COL_TEAM2_SCORE: "",
-                                    config.COL_MATCH_TYPE: "Mixed",
-                                    config.COL_MATCH_STATUS: config.STATUS_PENDING
-                                }
-                                new_matches.append(match)
-                                match_id_counter += 1
-                                
-                                # Update counts and remove used players
-                                for player in males + females:
-                                    player_match_counts[player] = player_match_counts.get(player, 0) + 1
-                                male_players = [p for p in male_players if p not in males]
-                                female_players = [p for p in female_players if p not in females]
+            with st.spinner("Generating possible match combinations..."):
+                progress_bar = st.progress(0)
+                total_steps = 3  # Mixed, Mens, Womens
+                current_step = 0
+                
+                # Generate Mixed Doubles combinations
+                if len(male_players) >= 2 and len(female_players) >= 2:
+                    male_combos = list(combinations(male_players, 2))
+                    female_combos = list(combinations(female_players, 2))
+                    total_mixed = len(male_combos) * len(female_combos)
                     
-                    elif match_type == "Mens" and len(male_players) >= 4:
-                        players = get_optimal_players(male_players, 4)
-                        if players:
+                    for i, males in enumerate(male_combos):
+                        for females in female_combos:
                             match = {
-                                config.COL_MATCH_ID: f"M{match_id_counter}",
-                                config.COL_COURT_NUMBER: "",
-                                config.COL_TEAM1_PLAYER1: players[0],
-                                config.COL_TEAM1_PLAYER2: players[1],
-                                config.COL_TEAM2_PLAYER1: players[2],
-                                config.COL_TEAM2_PLAYER2: players[3],
-                                config.COL_START_TIME: "",
-                                config.COL_END_TIME: "",
-                                config.COL_TEAM1_SCORE: "",
-                                config.COL_TEAM2_SCORE: "",
-                                config.COL_MATCH_TYPE: "Mens",
-                                config.COL_MATCH_STATUS: config.STATUS_PENDING
+                                'players': (males[0], females[0], males[1], females[1]),
+                                'type': 'Mixed',
+                                'score': self.score_combination([males[0], females[0], males[1], females[1]], 'Mixed')
                             }
-                            new_matches.append(match)
-                            match_id_counter += 1
+                            possible_matches.append(match)
                             
-                            # Update counts and remove used players
-                            for player in players:
-                                player_match_counts[player] = player_match_counts.get(player, 0) + 1
-                            male_players = [p for p in male_players if p not in players]
-                    
-                    elif match_type == "Womens" and len(female_players) >= 4:
-                        players = get_optimal_players(female_players, 4)
-                        if players:
-                            match = {
-                                config.COL_MATCH_ID: f"M{match_id_counter}",
-                                config.COL_COURT_NUMBER: "",
-                                config.COL_TEAM1_PLAYER1: players[0],
-                                config.COL_TEAM1_PLAYER2: players[1],
-                                config.COL_TEAM2_PLAYER1: players[2],
-                                config.COL_TEAM2_PLAYER2: players[3],
-                                config.COL_START_TIME: "",
-                                config.COL_END_TIME: "",
-                                config.COL_TEAM1_SCORE: "",
-                                config.COL_TEAM2_SCORE: "",
-                                config.COL_MATCH_TYPE: "Womens",
-                                config.COL_MATCH_STATUS: config.STATUS_PENDING
-                            }
-                            new_matches.append(match)
-                            match_id_counter += 1
-                            
-                            # Update counts and remove used players
-                            for player in players:
-                                player_match_counts[player] = player_match_counts.get(player, 0) + 1
-                            female_players = [p for p in female_players if p not in players]
-            
-            # Convert new matches to DataFrame rows
-            new_rows = []
-            for match in new_matches:
-                new_rows.append([
-                    match[config.COL_MATCH_ID],
-                    match[config.COL_COURT_NUMBER],
-                    match[config.COL_TEAM1_PLAYER1],
-                    match[config.COL_TEAM1_PLAYER2],
-                    match[config.COL_TEAM2_PLAYER1],
-                    match[config.COL_TEAM2_PLAYER2],
-                    match[config.COL_START_TIME],
-                    match[config.COL_END_TIME],
-                    match[config.COL_TEAM1_SCORE],
-                    match[config.COL_TEAM2_SCORE],
-                    match[config.COL_MATCH_STATUS],
-                    match[config.COL_MATCH_TYPE]
-                ])
+                            # Update progress every 100 combinations
+                            if len(possible_matches) % 100 == 0:
+                                progress = (i * len(female_combos)) / total_mixed / total_steps
+                                progress_bar.progress(progress)
                 
-            # Append new matches to existing ones
-            all_matches = pd.concat([self.read_sheet(config.SHEET_MATCHES), pd.DataFrame(new_rows, columns=self.read_sheet(config.SHEET_MATCHES).columns)], ignore_index=True)
+                current_step += 1
+                progress_bar.progress(current_step / total_steps)
+                
+                # Generate Mens Doubles combinations
+                if len(male_players) >= 4:
+                    mens_combos = list(combinations(male_players, 4))
+                    for i, players in enumerate(mens_combos):
+                        match = {
+                            'players': players,
+                            'type': 'Mens',
+                            'score': self.score_combination(players, 'Mens')
+                        }
+                        possible_matches.append(match)
+                        
+                        # Update progress every 10 combinations
+                        if i % 10 == 0:
+                            progress = (current_step + (i / len(mens_combos))) / total_steps
+                            progress_bar.progress(progress)
+                
+                current_step += 1
+                progress_bar.progress(current_step / total_steps)
+                
+                # Generate Womens Doubles combinations
+                if len(female_players) >= 4:
+                    womens_combos = list(combinations(female_players, 4))
+                    for i, players in enumerate(womens_combos):
+                        match = {
+                            'players': players,
+                            'type': 'Womens',
+                            'score': self.score_combination(players, 'Womens')
+                        }
+                        possible_matches.append(match)
+                        
+                        # Update progress every 10 combinations
+                        if i % 10 == 0:
+                            progress = (current_step + (i / len(womens_combos))) / total_steps
+                            progress_bar.progress(progress)
+                
+                progress_bar.progress(1.0)
             
-            # Update the matches sheet
-            self.update_sheet(config.SHEET_MATCHES, [all_matches.columns.tolist()] + all_matches.values.tolist())
+            # Sort by score
+            with st.spinner("Selecting optimal matches..."):
+                possible_matches.sort(key=lambda x: x['score'], reverse=True)
+                
+                # Select best balanced set
+                selected = []
+                used_players = set()
+                selected_type_counts = {'Mixed': 0, 'Mens': 0, 'Womens': 0}
+                
+                while len(selected) < court_count and possible_matches:
+                    for match in possible_matches[:]:
+                        # Skip if any player already used
+                        if any(p in used_players for p in match['players']):
+                            continue
+                        
+                        # Check match type balance for this batch
+                        current_type = match['type']
+                        total_selected = sum(selected_type_counts.values())
+                        if total_selected > 0:
+                            type_ratio = selected_type_counts[current_type] / total_selected
+                            if type_ratio > 0.6:  # No more than 60% of any type
+                                continue
+                        
+                        # Add match
+                        selected.append(match)
+                        used_players.update(match['players'])
+                        selected_type_counts[current_type] += 1
+                        possible_matches.remove(match)
+                        break
+                    else:
+                        break  # No valid match found
+                
+                print(f"Selected match types: {selected_type_counts}")
             
-            # Clear cache after successful write
-            self._clear_cache()
-            
-            # Try to assign courts to the newly added matches
-            self.assign_courts_to_pending_matches()
-            
-            #st.write(f"Match generation completed. API calls so far: {self.api_calls}")
-            
-            return True
+            # Convert to match format and write to sheet
+            with st.spinner("Writing matches to sheet..."):
+                new_matches = []
+                match_id_counter = self._get_next_match_id()
+                
+                for match in selected:
+                    players = match['players']
+                    new_match = {
+                        config.COL_MATCH_ID: f"M{match_id_counter}",
+                        config.COL_COURT_NUMBER: "",
+                        config.COL_TEAM1_PLAYER1: players[0],
+                        config.COL_TEAM1_PLAYER2: players[1],
+                        config.COL_TEAM2_PLAYER1: players[2],
+                        config.COL_TEAM2_PLAYER2: players[3],
+                        config.COL_START_TIME: "",
+                        config.COL_END_TIME: "",
+                        config.COL_TEAM1_SCORE: "",
+                        config.COL_TEAM2_SCORE: "",
+                        config.COL_MATCH_TYPE: match['type'],
+                        config.COL_MATCH_STATUS: config.STATUS_PENDING
+                    }
+                    new_matches.append(new_match)
+                    match_id_counter += 1
+                
+                if not new_matches:
+                    print("No valid matches could be generated")
+                    return []
+                
+                # Convert new matches to DataFrame rows
+                new_rows = []
+                for match in new_matches:
+                    new_rows.append([
+                        match[config.COL_MATCH_ID],
+                        match[config.COL_COURT_NUMBER],
+                        match[config.COL_TEAM1_PLAYER1],
+                        match[config.COL_TEAM1_PLAYER2],
+                        match[config.COL_TEAM2_PLAYER1],
+                        match[config.COL_TEAM2_PLAYER2],
+                        match[config.COL_START_TIME],
+                        match[config.COL_END_TIME],
+                        match[config.COL_TEAM1_SCORE],
+                        match[config.COL_TEAM2_SCORE],
+                        match[config.COL_MATCH_STATUS],
+                        match[config.COL_MATCH_TYPE]
+                    ])
+                
+                # Get existing matches or create empty DataFrame with correct columns
+                if matches_df.empty:
+                    matches_df = pd.DataFrame(columns=[
+                        config.COL_MATCH_ID,
+                        config.COL_COURT_NUMBER,
+                        config.COL_TEAM1_PLAYER1,
+                        config.COL_TEAM1_PLAYER2,
+                        config.COL_TEAM2_PLAYER1,
+                        config.COL_TEAM2_PLAYER2,
+                        config.COL_START_TIME,
+                        config.COL_END_TIME,
+                        config.COL_TEAM1_SCORE,
+                        config.COL_TEAM2_SCORE,
+                        config.COL_MATCH_STATUS,
+                        config.COL_MATCH_TYPE
+                    ])
+                
+                # Append new matches to existing ones
+                new_matches_df = pd.DataFrame(new_rows, columns=matches_df.columns)
+                all_matches = pd.concat([matches_df, new_matches_df], ignore_index=True)
+                
+                # Update the matches sheet
+                self.update_sheet(config.SHEET_MATCHES, [all_matches.columns.tolist()] + all_matches.values.tolist())
+                
+                # Clear cache after successful write
+                self._clear_cache()
+                
+                print(f"Successfully generated and wrote {len(new_matches)} matches")
+                
+                # Assign courts to pending matches
+                print("Assigning courts to pending matches...")
+                self.assign_pending_matches_to_courts(court_count)
+                
+                return new_matches
             
         except Exception as e:
-            st.error(f"Error generating matches: {str(e)}")
-            return False
+            print(f"Error generating matches: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return []
+
+    def score_combination(self, players, match_type):
+        score = 0
+        matches_df = self.read_sheet(config.SHEET_MATCHES)
+        
+        # For first run with empty matches sheet, ensure mix of types
+        if matches_df.empty:
+            # Give slight preference to non-mixed matches initially
+            if match_type in ['Mens', 'Womens']:
+                score += 50
+            return score
+        
+        # Calculate current match type ratios
+        total_matches = len(matches_df)
+        mixed_ratio = len(matches_df[matches_df[config.COL_MATCH_TYPE] == 'Mixed']) / total_matches
+        mens_ratio = len(matches_df[matches_df[config.COL_MATCH_TYPE] == 'Mens']) / total_matches
+        womens_ratio = len(matches_df[matches_df[config.COL_MATCH_TYPE] == 'Womens']) / total_matches
+        
+        # Adjust score based on match type ratios
+        if mixed_ratio > 0.5 and match_type == 'Mixed':
+            score -= 300  # Heavy penalty for too many mixed matches
+        elif mens_ratio < 0.2 and match_type == 'Mens':
+            score += 200  # Bonus for needed mens matches
+        elif womens_ratio < 0.2 and match_type == 'Womens':
+            score += 200  # Bonus for needed womens matches
+        
+        # Prefer players with fewer games
+        max_games = max(self.player_match_counts.values()) if self.player_match_counts else 1
+        for player in players:
+            games_played = self.player_match_counts.get(player, 0)
+            score += (max_games - games_played) * 2
+        
+        # Hard requirements for match type balance per player
+        for player in players:
+            total_matches = self.match_type_counts[player]['Mixed'] + self.match_type_counts[player]['Same']
+            if total_matches >= 3:  # Only apply after a few matches
+                mixed_ratio = self.match_type_counts[player]['Mixed'] / total_matches
+                same_ratio = self.match_type_counts[player]['Same'] / total_matches
+                
+                # Severe penalty if ratio is too imbalanced (should be close to 0.5)
+                if mixed_ratio > 0.6 and match_type == 'Mixed':
+                    score -= 400  # Even heavier penalty for too many mixed matches
+                elif same_ratio < 0.3 and match_type in ['Mens', 'Womens']:
+                    score += 300  # Strong bonus for needed same-gender matches
+        
+        # Partner repetition penalty
+        for i, p1 in enumerate(players):
+            for p2 in players[i+1:]:
+                if p2 in self.player_interactions[p1]['with']:
+                    shared_matches = sum(1 for _, match in matches_df.iterrows() if 
+                        ((match[config.COL_TEAM1_PLAYER1] == p1 and match[config.COL_TEAM1_PLAYER2] == p2) or
+                         (match[config.COL_TEAM1_PLAYER2] == p1 and match[config.COL_TEAM1_PLAYER1] == p2) or
+                         (match[config.COL_TEAM2_PLAYER1] == p1 and match[config.COL_TEAM2_PLAYER2] == p2) or
+                         (match[config.COL_TEAM2_PLAYER2] == p1 and match[config.COL_TEAM2_PLAYER1] == p2)))
+                    score -= 50 * shared_matches  # Doubled penalty for repeat partnerships
+        
+        return score
 
     def _get_player_interactions(self, matches_df=None):
         """Track who has played with/against whom."""
@@ -1032,21 +1106,36 @@ class SheetsManager:
         return wait_time
 
     def _get_player_match_counts(self, active_players, matches_df=None):
-        """Get the number of matches played by each player"""
+        """Get the number of matches played by each player and their match type distribution"""
         if matches_df is None:
             matches_df = self.read_sheet(config.SHEET_MATCHES)
         
         match_counts = {}
-        for player in active_players:
-            matches = matches_df[
-                (matches_df[config.COL_TEAM1_PLAYER1] == player) |
-                (matches_df[config.COL_TEAM1_PLAYER2] == player) |
-                (matches_df[config.COL_TEAM2_PLAYER1] == player) |
-                (matches_df[config.COL_TEAM2_PLAYER2] == player)
-            ]
-            match_counts[player] = len(matches)
+        match_type_counts = {}  # Track mixed vs same-gender matches per player
         
-        return match_counts
+        for player in active_players:
+            match_counts[player] = 0
+            match_type_counts[player] = {'Mixed': 0, 'Same': 0}  # Same represents Mens/Womens
+            
+            # Count completed and in-progress matches
+            player_matches = matches_df[
+                ((matches_df[config.COL_TEAM1_PLAYER1] == player) |
+                 (matches_df[config.COL_TEAM1_PLAYER2] == player) |
+                 (matches_df[config.COL_TEAM2_PLAYER1] == player) |
+                 (matches_df[config.COL_TEAM2_PLAYER2] == player)) &
+                (matches_df[config.COL_MATCH_STATUS].isin([config.STATUS_COMPLETED, config.STATUS_IN_PROGRESS, config.STATUS_SCHEDULED, config.STATUS_PENDING]))
+            ]
+            
+            match_counts[player] = len(player_matches)
+            
+            # Count match types
+            for _, match in player_matches.iterrows():
+                if match[config.COL_MATCH_TYPE] == 'Mixed':
+                    match_type_counts[player]['Mixed'] += 1
+                else:
+                    match_type_counts[player]['Same'] += 1
+        
+        return match_counts, match_type_counts
 
     def _get_next_match_id(self):
         """Get the next available match ID"""
@@ -1168,4 +1257,84 @@ class SheetsManager:
             return True
         except Exception as e:
             st.error(f"Error migrating gender values: {str(e)}")
+            return False
+
+    def get_available_courts(self, total_courts):
+        """Get list of courts that don't have scheduled/in-progress matches."""
+        matches_df = self.read_sheet(config.SHEET_MATCHES)
+        if matches_df.empty:
+            return list(range(1, total_courts + 1))
+            
+        # Get courts that are currently in use (scheduled or in progress)
+        busy_courts = set(matches_df[
+            (matches_df[config.COL_MATCH_STATUS].isin([config.STATUS_SCHEDULED, config.STATUS_IN_PROGRESS])) &
+            (matches_df[config.COL_COURT_NUMBER].notna()) &
+            (matches_df[config.COL_COURT_NUMBER] != "")
+        ][config.COL_COURT_NUMBER].astype(int).unique())
+        
+        # Return available courts
+        all_courts = set(range(1, total_courts + 1))
+        available_courts = list(all_courts - busy_courts)
+        available_courts.sort()  # Keep courts in order
+        return available_courts
+
+    def assign_pending_matches_to_courts(self, total_courts):
+        """Assign pending matches to available courts."""
+        try:
+            # Get truly available courts
+            available_courts = self.get_available_courts(total_courts)
+            if not available_courts:
+                print("No courts available")
+                return False
+                
+            # Get current matches
+            matches_df = self.read_sheet(config.SHEET_MATCHES)
+            if matches_df.empty:
+                print("No matches found")
+                return False
+            
+            # Filter for pending matches
+            pending_matches = matches_df[
+                (matches_df[config.COL_MATCH_STATUS] == config.STATUS_PENDING) & 
+                (matches_df[config.COL_COURT_NUMBER].isna() | (matches_df[config.COL_COURT_NUMBER] == ""))
+            ]
+            
+            if pending_matches.empty:
+                print("No pending matches found")
+                return False
+            
+            # Assign courts to pending matches
+            court_assignments = {}
+            available_courts = list(available_courts)  # Make a copy to avoid modifying original
+            
+            for _, match in pending_matches.iterrows():
+                match_id = match[config.COL_MATCH_ID]
+                if available_courts:
+                    court = available_courts.pop(0)
+                    court_assignments[match_id] = court
+            
+            if not court_assignments:
+                print("No courts available to assign")
+                return False
+            
+            # Update matches with court assignments
+            current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            for match_id, court in court_assignments.items():
+                matches_df.loc[matches_df[config.COL_MATCH_ID] == match_id, config.COL_COURT_NUMBER] = court
+                matches_df.loc[matches_df[config.COL_MATCH_ID] == match_id, config.COL_START_TIME] = current_time
+                matches_df.loc[matches_df[config.COL_MATCH_ID] == match_id, config.COL_MATCH_STATUS] = config.STATUS_SCHEDULED
+            
+            # Write updated matches back to sheet
+            self.update_sheet(config.SHEET_MATCHES, [matches_df.columns.tolist()] + matches_df.values.tolist())
+            
+            # Clear cache after update
+            self._clear_cache()
+            
+            print(f"Assigned {len(court_assignments)} matches to courts {list(court_assignments.values())}")
+            return True
+            
+        except Exception as e:
+            print(f"Error assigning courts: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return False
