@@ -97,6 +97,14 @@ def get_sheet_data():
     matches_df = sheets_mgr.read_sheet(config.SHEET_MATCHES)
     return matches_df
 
+def get_ordinal(n):
+    """Return ordinal string (1st, 2nd, 3rd, etc.) for a number."""
+    if 10 <= n % 100 <= 20:
+        suffix = 'th'
+    else:
+        suffix = {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')
+    return f"{n}{suffix}"
+
 def display_courts(matches_df):
     # Get active courts
     active_matches = matches_df[
@@ -199,7 +207,7 @@ def display_pending(matches_df):
             
             pending_content = f"""
             <div class="pending-content{conflict_class}">
-            <div class="queue-number">{idx}</div>
+            <div class="queue-number">{get_ordinal(idx)}</div>
             <strong>{match[config.COL_MATCH_TYPE]}</strong><br>
             {team1_p1} &amp; {team1_p2}<br>
             {team2_p1} &amp; {team2_p2}
