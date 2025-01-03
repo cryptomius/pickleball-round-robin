@@ -112,7 +112,7 @@ def get_match_type_standings(players_df, matches_df, match_type, gender=None):
     
     standings_df = pd.DataFrame(standings)
     if not standings_df.empty:
-        standings_df = standings_df.sort_values('avg_points', ascending=False).head(10)
+        standings_df = standings_df.sort_values('avg_points', ascending=False)
     
     return standings_df
 
@@ -150,7 +150,7 @@ def display_standings(players_df, title, min_games=config.MIN_GAMES_FOR_RANKING)
     
     if not qualified_players.empty:
         st.markdown(f"**Qualified Players (≥{min_games} games)**")
-        qualified_players = qualified_players.sort_values(config.COL_AVG_POINTS, ascending=False).head(10)
+        qualified_players = qualified_players.sort_values(config.COL_AVG_POINTS, ascending=False)
         for i, (_, player) in enumerate(qualified_players.iterrows()):
             match_types = get_player_match_types(player[config.COL_NAME])
             trophy = "🏆 " if i == 0 else "🥈 " if i == 1 else ""
