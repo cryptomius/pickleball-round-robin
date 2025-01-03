@@ -160,10 +160,10 @@ def main():
                 match = current_match.iloc[0]
                 st.header("Your Current Match")
                 court_number = match[config.COL_COURT_NUMBER]
-                if pd.isna(court_number) or court_number == "":
+                if pd.isna(court_number):
                     court_display = "Court TBC"
                 else:
-                    court_display = f"Court {str(court_number).replace('Court ', '')}"
+                    court_display = f"Court {int(float(str(court_number).replace('Court ', '')))}"
                 st.subheader(court_display)
                 
                 # Determine which team the player is on
@@ -213,10 +213,10 @@ def main():
                     match_position = all_pending_matches[all_pending_matches[config.COL_MATCH_ID] == match[config.COL_MATCH_ID]].index[0] + 1
                     
                     court_number = match[config.COL_COURT_NUMBER]
-                    if pd.isna(court_number) or court_number == "":
+                    if pd.isna(court_number):
                         court_display = "Court TBC"
                     else:
-                        court_display = f"Court {str(court_number).replace('Court ', '')}"
+                        court_display = f"Court {int(float(str(court_number).replace('Court ', '')))}"
                     
                     st.markdown(
                         f"**Queue Position: {match_position}** ({court_display}) - {match[config.COL_MATCH_TYPE]} Doubles  \n"
@@ -239,10 +239,10 @@ def main():
             if not completed_matches.empty:
                 for match_num, (_, match) in enumerate(completed_matches.iterrows(), 1):
                     court_number = match[config.COL_COURT_NUMBER]
-                    if pd.isna(court_number) or court_number == "":
+                    if pd.isna(court_number):
                         court_display = "Court TBC"
                     else:
-                        court_display = f"Court {int(court_number)}"
+                        court_display = f"Court {int(float(court_number))}"
                     
                     # Determine if the player won
                     team1_score = int(match[config.COL_TEAM1_SCORE])
