@@ -95,8 +95,8 @@ st.markdown("""
 # Initialize sheets manager
 sheets_mgr = SheetsManager()
 
-# Cache data with a 60-second TTL
-@st.cache_data(ttl=55)  # Slightly less than refresh interval to ensure fresh data
+# Cache data with a 15-second TTL ...
+@st.cache_data(ttl=14)  # Slightly less than refresh interval to ensure fresh data
 def get_sheet_data():
     matches_df = sheets_mgr.read_sheet(config.SHEET_MATCHES)
     return matches_df
