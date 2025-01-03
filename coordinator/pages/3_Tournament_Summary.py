@@ -156,7 +156,7 @@ def display_standings(players_df, title, min_games=config.MIN_GAMES_FOR_RANKING)
             trophy = "🏆 " if i == 0 else "🥈 " if i == 1 else ""
             st.write(
                 f"{i+1}. {trophy}{player[config.COL_NAME]} - "
-                f"{float(player[config.COL_AVG_POINTS]):.1f} "
+                f"{float(player[config.COL_AVG_POINTS]):.5f} "
                 f"({int(player[config.COL_GAMES_PLAYED])}: {match_types})"
             )
     else:
@@ -169,7 +169,7 @@ def display_standings(players_df, title, min_games=config.MIN_GAMES_FOR_RANKING)
             match_types = get_player_match_types(player[config.COL_NAME])
             st.write(
                 f"• {player[config.COL_NAME]} - "
-                f"{float(player[config.COL_AVG_POINTS]):.1f} "
+                f"{float(player[config.COL_AVG_POINTS]):.5f} "
                 f"({int(player[config.COL_GAMES_PLAYED])}: {match_types})"
             )
 
@@ -188,7 +188,7 @@ def display_match_type_standings(standings_df, title, min_games=config.MIN_GAMES
                 trophy = "🏆 " if i == 0 else "🥈 " if i == 1 else ""
                 st.write(
                     f"{i+1}. {trophy}{row['name']} - "
-                    f"{row['avg_points']:.1f} "
+                    f"{row['avg_points']:.5f} "
                     f"({int(row['games'])})"
                 )
         else:
@@ -199,7 +199,7 @@ def display_match_type_standings(standings_df, title, min_games=config.MIN_GAMES
             for _, row in unqualified_players.iterrows():
                 st.write(
                     f"• {row['name']} - "
-                    f"{row['avg_points']:.1f} "
+                    f"{row['avg_points']:.5f} "
                     f"({int(row['games'])})"
                 )
     else:
